@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Zentavo — Budget, Debt & Savings Tracker</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #0a0e17;
+            color: #c8cdd6;
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+        .hero {
+            max-width: 720px;
+            margin: 0 auto;
+            padding: 80px 24px 60px;
+            text-align: center;
+        }
+        .logo {
+            font-size: 42px;
+            font-weight: 700;
+            color: #2dd4a8;
+            letter-spacing: -1px;
+            margin-bottom: 4px;
+        }
+        .logo span { color: #ffffff; }
+        .tagline {
+            font-size: 16px;
+            color: #6b7280;
+            margin-bottom: 48px;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            font-weight: 500;
+        }
+        h1 {
+            font-size: 40px;
+            font-weight: 700;
+            color: #ffffff;
+            line-height: 1.2;
+            margin-bottom: 20px;
+        }
+        h1 em {
+            font-style: normal;
+            color: #2dd4a8;
+        }
+        .subtitle {
+            font-size: 18px;
+            line-height: 1.7;
+            color: #9ca3af;
+            max-width: 540px;
+            margin: 0 auto 40px;
+        }
+        .app-store-btn {
+            display: inline-block;
+            background: #ffffff;
+            color: #0a0e17;
+            padding: 16px 36px;
+            border-radius: 14px;
+            font-size: 17px;
+            font-weight: 600;
+            text-decoration: none;
+            transition: all 0.2s;
+        }
+        .app-store-btn:hover {
+            background: #2dd4a8;
+            color: #0a0e17;
+            transform: translateY(-2px);
+        }
+        .app-store-btn .small {
+            font-size: 12px;
+            font-weight: 400;
+            display: block;
+            margin-bottom: 2px;
+            opacity: 0.7;
+        }
+        .features {
+            max-width: 720px;
+            margin: 0 auto;
+            padding: 40px 24px 60px;
+        }
+        .features-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+        @media (max-width: 520px) {
+            .features-grid { grid-template-columns: 1fr; }
+            h1 { font-size: 30px; }
+        }
+        .feature-card {
+            background: #111827;
+            border: 1px solid #1f2937;
+            border-radius: 16px;
+            padding: 28px 24px;
+        }
+        .feature-icon {
+            width: 44px;
+            height: 44px;
+            background: #2dd4a815;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 16px;
+            font-size: 22px;
+        }
+        .feature-card h3 {
+            font-size: 16px;
+            font-weight: 600;
+            color: #ffffff;
+            margin-bottom: 8px;
+        }
+        .feature-card p {
+            font-size: 14px;
+            line-height: 1.6;
+            color: #6b7280;
+        }
+        .privacy-banner {
+            max-width: 720px;
+            margin: 0 auto;
+            padding: 40px 24px;
+            text-align: center;
+        }
+        .privacy-badge {
+            display: inline-block;
+            background: #111827;
+            border: 1px solid #1f2937;
+            border-radius: 100px;
+            padding: 12px 28px;
+            font-size: 14px;
+            color: #2dd4a8;
+            font-weight: 500;
+        }
+        .divider {
+            height: 1px;
+            max-width: 720px;
+            margin: 0 auto;
+            background: linear-gradient(to right, transparent, #1f2937, transparent);
+        }
+        .footer {
+            max-width: 720px;
+            margin: 0 auto;
+            padding: 32px 24px;
+            text-align: center;
+            font-size: 13px;
+            color: #4b5563;
+        }
+        .footer a {
+            color: #2dd4a8;
+            text-decoration: none;
+            margin: 0 12px;
+        }
+        .footer a:hover { text-decoration: underline; }
+    </style>
+</head>
+<body>
+    <div class="hero">
+        <div class="logo">Zent<span>avo</span></div>
+        <div class="tagline">Budget, Debt & Savings Tracker</div>
+        <h1>Take control of your money. <em>No bank login required.</em></h1>
+        <p class="subtitle">Track spending, crush debt with Snowball or Avalanche strategies, manage subscriptions, and build savings — all from your iPhone. Your data stays on your device.</p>
+        <a href="#" class="app-store-btn">
+            <span class="small">Download on the</span>
+            App Store
+        </a>
+    </div>
+
+    <div class="features">
+        <div class="features-grid">
+            <div class="feature-card">
+                <div class="feature-icon">📊</div>
+                <h3>Smart Dashboard</h3>
+                <p>See your net worth, savings, debt, and budget progress at a glance with weekly and monthly charts.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">💳</div>
+                <h3>Debt Payoff Strategies</h3>
+                <p>Compare Snowball vs Avalanche methods with timeline projections and interest savings.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">🔄</div>
+                <h3>Subscription Tracker</h3>
+                <p>Track every subscription with billing dates, costs, and due-in-days countdowns.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">🎯</div>
+                <h3>Savings Goals</h3>
+                <p>Set goals and track your progress toward what matters most to you.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">💰</div>
+                <h3>Category Budgets</h3>
+                <p>Set limits by category with auto-calculated totals and spending breakdowns.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">🔒</div>
+                <h3>100% Private</h3>
+                <p>No bank linking. No accounts. No tracking. All your data stays on your device.</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="privacy-banner">
+        <div class="privacy-badge">🛡️ Your financial data never leaves your device</div>
+    </div>
+
+    <div class="divider"></div>
+
+    <div class="footer">
+        <p>© 2026 Zentavo. All rights reserved.</p>
+        <p style="margin-top: 12px;">
+            <a href="/privacy">Privacy Policy</a>
+            <a href="mailto:support@marketsoleil.com">Contact</a>
+        </p>
+    </div>
+</body>
+</html>
