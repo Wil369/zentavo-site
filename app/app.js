@@ -1,0 +1,582 @@
+import { CONFIG } from './config.js';
+import { cloudConfigured, connect, fetchAll, mapRecords, sampleData } from './data.js';
+import * as M from './money.js';
+
+const root = document.getElementById('root');
+const tipEl = document.getElementById('tip');
+const state = {
+  data: null,
+  view: (location.hash.slice(1) || 'overview'),
+  calMonth: M.monthStart(new Date()),
+  txFilter: { q: '', month: 'this', type: 'all', category: 'all', sort: 'date', dir: -1 },
+  syncedAt: null,
+  container: null,
+};
+
+// ---------- tiny helpers ----------
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const fmtDay = (d, opts = { month: 'short', day: 'numeric' }) => d.toLocaleDateString('en-US', opts);
+const fmtTime = (d) => d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+const pct = (a, b) => (b > 0 ? Math.max(0, Math.min(100, (a / b) * 100)) : 0);
+
+const ICON = {
+  overview: '<path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/>',
+  transactions: '<path d="M4 6h16M4 12h16M4 18h10"/>',
+  bills: '<rect x="4" y="3" width="16" height="18" rx="3"/><path d="M8 8h8M8 12h8M8 16h5"/>',
+  paychecks: '<rect x="2" y="6" width="20" height="12" rx="3"/><circle cx="12" cy="12" r="2.5"/>',
+  goals: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/>',
+  lock: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
+  check: '<path d="M5 12l4 4 10-10"/>',
+  car: '<path d="M5 16l1.5-5h11L19 16"/><rect x="3" y="16" width="18" height="3" rx="1"/>',
+  cart: '<path d="M3 4h2l2 11h11l2-8H6"/><circle cx="9" cy="19" r="1.4"/><circle cx="17" cy="19" r="1.4"/>',
+  home: '<path d="M4 11l8-6 8 6v9H4z"/>',
+  repeat: '<path d="M4 12a8 8 0 0 1 14-5l2 2M20 12a8 8 0 0 1-14 5l-2-2"/><path d="M20 4v5h-5M4 20v-5h5"/>',
+  bag: '<path d="M5 8h14l-1 12H6z"/><path d="M9 8a3 3 0 0 1 6 0"/>',
+  star: '<path d="M12 4l2.4 5 5.6.6-4.2 3.8 1.2 5.6L12 16.3 7 19l1.2-5.6L4 9.6 9.6 9z"/>',
+  heart: '<path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z"/>',
+  coin: '<circle cx="12" cy="12" r="8"/><path d="M12 8v8M9.5 10h4a1.5 1.5 0 0 1 0 3h-3a1.5 1.5 0 0 0 0 3h4"/>',
+  dot: '<circle cx="12" cy="12" r="3"/>',
+};
+const svg = (name, cls = '') => `<svg viewBox="0 0 24 24" class="${cls}" aria-hidden="true">${ICON[name] || ICON.dot}</svg>`;
+const catIcon = (c) => ({ Housing: 'home', 'Food & Groceries': 'cart', Transportation: 'car', Subscriptions: 'repeat', Shopping: 'bag',
+  Entertainment: 'star', 'Personal Care': 'heart', Healthcare: 'heart', Salary: 'coin', Savings: 'coin' }[c] || 'dot');
+
+// Fixed category → series slot, so a category keeps its color everywhere (never by rank).
+const CAT_SLOT = { Bills: 1, 'Food & Groceries': 2, Transportation: 3, Shopping: 4, Entertainment: 5, 'Personal Care': 6, Healthcare: 6, Other: 8, Savings: 7, Education: 8, Subscriptions: 1, Housing: 1 };
+const slotColor = (c) => `var(--s${CAT_SLOT[c] || 8})`;
+
+// ---------- tooltip ----------
+document.addEventListener('mousemove', (e) => {
+  const target = e.target.closest?.('[data-tip]');
+  if (!target) { tipEl.classList.remove('on'); return; }
+  tipEl.innerHTML = target.getAttribute('data-tip');
+  tipEl.classList.add('on');
+  const w = tipEl.offsetWidth, h = tipEl.offsetHeight;
+  let x = e.clientX + 14, y = e.clientY + 14;
+  if (x + w > innerWidth - 8) x = e.clientX - w - 14;
+  if (y + h > innerHeight - 8) y = e.clientY - h - 14;
+  tipEl.style.left = `${x}px`; tipEl.style.top = `${y}px`;
+});
+document.addEventListener('scroll', () => tipEl.classList.remove('on'), true);
+
+// ---------- boot ----------
+async function boot() {
+  const wantsSample = new URLSearchParams(location.search).has('sample');
+  if (!cloudConfigured() || wantsSample) {
+    state.data = sampleData();
+    render();
+    return;
+  }
+  renderGate();
+  try {
+    const container = await connect({ onSignedOut: () => { state.data = null; renderGate(); } });
+    state.container = container;
+    await loadFromCloud();
+  } catch (err) {
+    renderGate(err.message || String(err));
+  }
+}
+
+async function loadFromCloud() {
+  root.innerHTML = `<div class="gate"><p class="loading" id="progress">Loading your Zentavo from iCloud…</p></div>`;
+  const records = await fetchAll(state.container, (n) => {
+    const p = document.getElementById('progress');
+    if (p) p.textContent = `Loading your Zentavo from iCloud… ${n} items`;
+  });
+  state.data = mapRecords(records);
+  state.syncedAt = new Date();
+  render();
+}
+
+function renderGate(error) {
+  root.innerHTML = `
+    <div class="gate"><div class="gate-card">
+      <div class="brand" style="justify-content:center;padding:0">${brandMark()}<span>Zentavo</span></div>
+      <h1>Your money, on a big screen.</h1>
+      <p>Sign in with the Apple ID you use on your iPhone. Your Zentavo data comes straight from your private iCloud.</p>
+      <div class="gate-points">
+        <div>${svg('check')}<span>No bank login, ever. No Zentavo account.</span></div>
+        <div>${svg('check')}<span>Nothing passes through a Zentavo server. This page talks only to Apple.</span></div>
+        <div>${svg('check')}<span>The same numbers as your iPhone: daily limit, paydays, bills and splits.</span></div>
+      </div>
+      <div id="apple-sign-in-button"></div>
+      <div id="apple-sign-out-button" hidden></div>
+      ${error ? `<p class="error">${esc(error)}</p>` : ''}
+      <p class="small muted" style="margin-top:18px">Just looking? <a href="?sample">See it with sample data</a></p>
+    </div></div>`;
+}
+
+function brandMark() {
+  return `<span class="brand-mark"><svg viewBox="0 0 24 24"><path d="M5 18V12M10 18V8M15 18V11M20 18V5" stroke="#0B0F14" stroke-width="3" stroke-linecap="round" fill="none"/></svg></span>`;
+}
+
+// ---------- shell ----------
+const VIEWS = [
+  ['overview', 'Overview'], ['transactions', 'Transactions'], ['bills', 'Bills & splits'], ['paychecks', 'Paychecks'], ['goals', 'Goals & debts'],
+];
+
+function render() {
+  const d = state.data;
+  if (!VIEWS.some(([k]) => k === state.view)) state.view = 'overview';
+  const hour = new Date().getHours();
+  const greeting = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
+  const title = VIEWS.find(([k]) => k === state.view)[1];
+  root.innerHTML = `
+    <div class="shell">
+      <nav class="sidebar" aria-label="Sections">
+        <div class="brand">${brandMark()}<span>Zentavo</span></div>
+        ${VIEWS.map(([k, label]) => `<button class="nav-btn" data-view="${k}" ${k === state.view ? 'aria-current="page"' : ''}>${svg(k)}<span>${label}</span></button>`).join('')}
+        <div class="sidebar-foot">
+          <div class="privacy-pill">${svg('lock')}<span>${d.source === 'icloud' ? 'Read straight from your iCloud. Nothing stored by Zentavo.' : 'Sample data. Your real data never leaves your iCloud.'}</span></div>
+          ${d.source === 'icloud' ? `<div id="apple-sign-out-button"></div>` : ''}
+        </div>
+      </nav>
+      <main class="main">
+        <div class="topbar">
+          <div><div class="greeting">${greeting}</div><h1 class="page-title">${title}</h1></div>
+          <div class="top-actions">
+            ${d.source === 'icloud'
+              ? `<span class="chip">Synced ${state.syncedAt ? fmtTime(state.syncedAt) : ''}</span><button class="btn" id="refresh">Refresh</button>`
+              : `<span class="chip">Sample data</span>`}
+          </div>
+        </div>
+        ${d.source === 'sample' ? `<div class="banner"><p><strong>You're looking at sample data.</strong> With Zentavo on your iPhone, sign in with Apple to see your own.</p>${cloudConfigured() ? '<a class="btn primary" href="./">Sign in with Apple</a>' : '<span class="chip">Sign in with Apple coming soon</span>'}</div>` : ''}
+        <div id="view"></div>
+      </main>
+    </div>`;
+  root.querySelectorAll('[data-view]').forEach((b) => b.addEventListener('click', () => {
+    state.view = b.dataset.view;
+    history.replaceState(null, '', `#${state.view}`);
+    render();
+    window.scrollTo(0, 0);
+  }));
+  document.getElementById('refresh')?.addEventListener('click', () => loadFromCloud().catch((e) => alertBanner(e.message)));
+  const view = document.getElementById('view');
+  ({ overview: viewOverview, transactions: viewTransactions, bills: viewBills, paychecks: viewPaychecks, goals: viewGoals })[state.view](view, d);
+}
+
+function alertBanner(message) {
+  const view = document.getElementById('view');
+  view.insertAdjacentHTML('afterbegin', `<div class="banner"><p><strong>Couldn't refresh.</strong> ${esc(message)}</p></div>`);
+}
+
+// ---------- overview ----------
+function viewOverview(el, d) {
+  const now = new Date();
+  const fig = M.monthlyFigures(d, now);
+  const limit = M.dailyLimit(d, now, now);
+  const today = M.startOfDay(now);
+  const spentToday = M.spentByDay(d.transactions, now).get(today.getTime()) || 0;
+  const status = M.dayStatus(spentToday, limit.amount);
+  const daysLeft = M.daysInMonth(now) - now.getDate() + 1;
+  const perDay = fig.leftToSpend / daysLeft;
+  const p = M.pace(d, now);
+  const outlook = p ? M.monthOutlook(d, p, now, now) : null;
+  const monthName = now.toLocaleDateString('en-US', { month: 'long' });
+
+  el.innerHTML = `
+    <section class="grid kpis">
+      <div class="card">
+        <h2>Left to spend in ${monthName}</h2>
+        <div class="hero-num ${fig.leftToSpend < 0 ? 'over' : ''}">${M.money(fig.leftToSpend)}</div>
+        ${fig.budget > 0 ? `<div class="bar ${fig.leftToSpend < 0 ? 'rose' : pct(fig.expenses, fig.budget) > 85 ? 'amber' : ''}"><span style="width:${pct(fig.expenses, fig.budget)}%"></span></div>
+        <div class="kpi-sub"><b>${M.money0(fig.expenses)}</b> of ${M.money(fig.budget)} budget · about <b>${M.money(Math.max(perDay, 0))}</b> a day for the rest of ${monthName}</div>` : `<div class="kpi-sub">No monthly budget set</div>`}
+      </div>
+      <div class="card">
+        <h2>Today</h2>
+        <div class="kpi-val ${status === 'over' ? 'status-bad' : status === 'close' ? 'status-warn' : ''}">${M.money(spentToday)}</div>
+        <div class="kpi-sub">${limit.amount > 0 ? `of ${M.money0(limit.amount)} daily limit · <b class="${status === 'over' ? 'status-bad' : 'status-good'}">${spentToday > limit.amount ? `${M.money(spentToday - limit.amount)} over` : `${M.money(limit.amount - spentToday)} left`}</b>` : 'No daily limit set'}</div>
+        ${limit.amount > 0 ? `<div class="bar ${status === 'over' ? 'rose' : status === 'close' ? 'amber' : ''}"><span style="width:${pct(spentToday, limit.amount)}%"></span></div>` : ''}
+      </div>
+      <div class="card">
+        <h2>Next payday</h2>
+        ${p ? `<div class="kpi-val">${M.sameDay(p.next, today) ? 'Today' : fmtDay(p.next, { weekday: 'short', month: 'short', day: 'numeric' })}</div>
+        <div class="kpi-sub">about <b>${M.money(p.nextAmount)}</b> · ${M.sameDay(p.next, today) ? 'lands today' : `in ${Math.round((p.next - today) / 86400000)} days`}</div>` : `<div class="kpi-val muted">—</div><div class="kpi-sub">No paychecks logged yet</div>`}
+      </div>
+      <div class="card">
+        <h2>Take-home in ${monthName}</h2>
+        ${outlook ? `<div class="kpi-val">${M.money0(outlook.received)}</div>
+        <div class="kpi-sub">received · about <b>${M.money0(outlook.expected)}</b> by month end${outlook.extra ? ' · extra payday this month' : ''}</div>
+        <div class="bar"><span style="width:${pct(outlook.received, outlook.expected)}%"></span></div>` : `<div class="kpi-val">${M.money0(fig.actualIncome)}</div><div class="kpi-sub">income logged this month</div>`}
+      </div>
+    </section>
+
+    <section class="card" style="margin-bottom:18px">
+      <h2>Next 14 days ${p ? `<span class="chip mint">Payday ${M.sameDay(p.next, today) ? 'today' : `in ${Math.round((p.next - today) / 86400000)} days`}</span>` : ''}</h2>
+      ${upcomingStrip(d, p, today)}
+    </section>
+
+    <section class="grid two">
+      <div class="card">
+        <h2>Day by day <span class="link small">${limit.amount > 0 ? `Limit ${M.money0(limit.amount)} a day` : ''}</span></h2>
+        <div id="calendar"></div>
+        <p class="small muted" style="margin-top:10px">${esc(limit.explanation || '')}</p>
+      </div>
+      <div class="card">
+        <h2>Recent <button class="link" data-goto="transactions">See all</button></h2>
+        ${txRows(d.transactions.filter((t) => t.date <= now && !M.isTemplate(t)).sort((a, b) => b.date - a.date).slice(0, 8))}
+      </div>
+    </section>
+
+    <section class="grid halves">
+      <div class="card flow">
+        <h2>Where ${monthName}'s money goes</h2>
+        ${cashFlow(d, now, p, outlook, fig)}
+      </div>
+      <div class="card">
+        <h2>Everyday spending by category</h2>
+        ${categoryBars(d, now)}
+      </div>
+    </section>`;
+  drawCalendar(el.querySelector('#calendar'), d, limit);
+  el.querySelectorAll('[data-goto]').forEach((b) => b.addEventListener('click', () => { state.view = b.dataset.goto; history.replaceState(null, '', `#${state.view}`); render(); }));
+}
+
+const compact = (v) => (v >= 1000 ? `$${(v / 1000).toFixed(1).replace(/\.0$/, '')}K` : M.money0(v));
+const both = (sign, v) => `<span class="full">${sign}${M.money0(v)}</span><span class="compact">${sign}${compact(v)}</span>`;
+
+function upcomingStrip(d, p, today) {
+  const end = M.addDays(today, 14);
+  const events = M.upcomingEvents(d, today, end).filter((e) => !e.isIncome);
+  const pays = p ? M.projectedPaydays(p, end) : [];
+  const cells = [];
+  for (let i = 0; i < 14; i++) {
+    const day = M.addDays(today, i);
+    const dayEvents = events.filter((e) => M.sameDay(e.date, day));
+    const pay = pays.find((x) => M.sameDay(x.day, day));
+    const tags = [
+      pay ? `<div class="tag pay" data-tip="<b>Payday</b><br>about ${M.money(pay.amount)}">${both('+', pay.amount)}</div>` : '',
+      ...dayEvents.slice(0, 2).map((e) => `<div class="tag" data-tip="<b>${esc(e.title)}</b><br>${M.money(e.amount)} · ${esc(e.detail)}">${both('', e.amount)}</div>`),
+      dayEvents.length > 2 ? `<div class="tag" data-tip="${esc(dayEvents.slice(2).map((e) => `${e.title} ${M.money(e.amount)}`).join('<br>'))}">+${dayEvents.length - 2} more</div>` : '',
+    ].join('');
+    cells.push(`<div class="strip-day ${i === 0 ? 'today' : ''}">
+      <div class="strip-dow">${i === 0 ? 'Today' : day.toLocaleDateString('en-US', { weekday: 'short' })}</div>
+      <div class="strip-date">${day.getDate()}</div>${tags}</div>`);
+  }
+  const billTotal = events.reduce((s, e) => s + e.amount, 0);
+  return `<div class="strip">${cells.join('')}</div>
+    <p class="small muted" style="margin-top:10px">${events.length ? `${events.length} bill${events.length === 1 ? '' : 's'} for ${M.money(billTotal)}` : 'No bills'}${pays.length ? ` · ${pays.length} payday${pays.length === 1 ? '' : 's'} for about ${M.money0(pays.reduce((s, x) => s + x.amount, 0))}` : ''}</p>`;
+}
+
+function drawCalendar(host, d, limitInfo) {
+  const month = state.calMonth;
+  const now = new Date();
+  const today = M.startOfDay(now);
+  const limit = M.inMonth(month, now) ? limitInfo.amount : M.dailyLimit(d, month, now).amount;
+  const totals = M.spentByDay(d.transactions, month);
+  const first = month.getDay();
+  const days = M.daysInMonth(month);
+  const firstUse = d.transactions.filter(M.countsForDay).reduce((m, t) => (t.date < m ? t.date : m), now);
+  let under = 0, counted = 0, sum = 0;
+  const cells = [];
+  ['S', 'M', 'T', 'W', 'T', 'F', 'S'].forEach((x) => cells.push(`<div class="cal-dow">${x}</div>`));
+  for (let i = 0; i < first; i++) cells.push('<div class="cal-cell empty"></div>');
+  for (let day = 1; day <= days; day++) {
+    const date = new Date(month.getFullYear(), month.getMonth(), day);
+    const spent = totals.get(date.getTime()) || 0;
+    const future = date > today;
+    const st = future || date < M.startOfDay(firstUse) ? 'none' : M.dayStatus(spent, limit);
+    if (!future && date >= M.startOfDay(firstUse)) { counted++; sum += spent; if (st === 'under' || st === 'close') under++; }
+    const entries = d.transactions.filter((t) => M.countsForDay(t) && M.sameDay(t.date, date));
+    const tip = `<b>${fmtDay(date, { weekday: 'long', month: 'short', day: 'numeric' })}</b><br>${M.money(spent)} spent${limit > 0 && !future ? ` of ${M.money0(limit)}` : ''}${entries.slice(0, 5).map((t) => `<br>· ${esc(t.title || t.category)} ${M.money(t.amount)}`).join('')}${entries.length > 5 ? `<br>· and ${entries.length - 5} more` : ''}`;
+    cells.push(`<div class="cal-cell ${st !== 'none' ? st : ''} ${future ? 'future' : ''} ${M.sameDay(date, today) ? 'today' : ''}" data-tip="${esc(tip)}">
+      <span class="d">${day}</span><span class="v">${spent > 0 ? M.money0(spent) : future ? '' : '$0'}</span></div>`);
+  }
+  const canNext = M.monthStart(month) < M.monthStart(now);
+  host.innerHTML = `
+    <div class="cal-head">
+      <button class="icon-btn" id="cal-prev" aria-label="Previous month">‹</button>
+      <span class="title">${month.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</span>
+      <button class="icon-btn" id="cal-next" aria-label="Next month" ${canNext ? '' : 'disabled'}>›</button>
+    </div>
+    <div class="cal">${cells.join('')}</div>
+    <div class="legend">
+      <span><i class="sw" style="background:var(--mint)"></i>Under</span>
+      <span><i class="sw" style="background:var(--amber)"></i>Close</span>
+      <span><i class="sw" style="background:var(--rose)"></i>Over</span>
+      <span class="num">${counted ? `${under} of ${counted} days at or under · average ${M.money(sum / counted)}` : ''}</span>
+    </div>`;
+  host.querySelector('#cal-prev').addEventListener('click', () => { state.calMonth = M.addMonths(state.calMonth, -1); drawCalendar(host, d, limitInfo); });
+  host.querySelector('#cal-next').addEventListener('click', () => { if (canNext) { state.calMonth = M.addMonths(state.calMonth, 1); drawCalendar(host, d, limitInfo); } });
+}
+
+function txRows(list) {
+  if (!list.length) return '<div class="empty-state">Nothing yet</div>';
+  return `<div class="rows">${list.map((t) => {
+    const s = M.share(t);
+    const sub = `${esc(M.shortName(t.category))} · ${fmtDay(t.date)}${s < 0.999 ? ` · your ${M.sharePhrase(s)} of ${M.money(t.fullAmount)}` : ''}`;
+    return `<div class="row"><span class="ic">${svg(catIcon(t.category))}</span>
+      <div class="grow"><div class="t">${esc(t.title || t.category)}</div><div class="s">${sub}</div></div>
+      <span class="amt ${t.type === 'income' ? 'in' : ''}">${t.type === 'income' ? '+' : '−'}${M.money(t.amount)}</span></div>`;
+  }).join('')}</div>`;
+}
+
+function categoryBars(d, month) {
+  const totals = new Map();
+  for (const t of d.transactions) if (M.countsForDay(t) && M.inMonth(t.date, month)) totals.set(t.category, (totals.get(t.category) || 0) + t.amount);
+  const rows = [...totals].sort((a, b) => b[1] - a[1]);
+  if (!rows.length) return '<div class="empty-state">No everyday spending this month yet</div>';
+  const max = rows[0][1];
+  const total = rows.reduce((s, r) => s + r[1], 0);
+  return rows.map(([c, v]) => `<div class="cat-row" data-tip="<b>${esc(c)}</b><br>${M.money(v)} · ${Math.round((v / total) * 100)}% of everyday spending">
+      <span class="name">${esc(M.shortName(c))}</span>
+      <span class="cat-track"><span class="cat-fill" style="width:${(v / max) * 100}%"></span></span>
+      <span class="val">${M.money0(v)}</span></div>`).join('')
+    + `<p class="small muted" style="margin-top:10px">${M.money(total)} everyday spending this month. Bills and savings are separate.</p>`;
+}
+
+function cashFlow(d, now, p, outlook, fig) {
+  const income = outlook ? Math.max(outlook.expected, outlook.received) : fig.income;
+  const bills = M.billsInMonth(d, now);
+  const cats = new Map();
+  for (const t of d.transactions) if (M.countsForDay(t) && M.inMonth(t.date, now)) cats.set(t.category, (cats.get(t.category) || 0) + t.amount);
+  let catRows = [...cats].sort((a, b) => b[1] - a[1]);
+  if (catRows.length > 5) {
+    const rest = catRows.slice(4).reduce((s, r) => s + r[1], 0);
+    catRows = [...catRows.slice(0, 4), ['Other', rest]];
+  }
+  const saved = fig.saved;
+  const outs = [['Bills', bills, 'Bills'], ...catRows.map(([c, v]) => [M.shortName(c), v, c]), ...(saved > 0 ? [['Savings', saved, 'Savings']] : [])];
+  const spent = outs.reduce((s, o) => s + o[1], 0);
+  const left = income - spent;
+  if (left > 0) outs.push(['Not spent yet', left, 'left']);
+  if (!(income > 0) || !outs.length) return '<div class="empty-state">Log a paycheck to see where your money goes</div>';
+
+  const W = 560, H = 320, nodeW = 12, gap = 6, labelW = 150;
+  const totalRight = outs.reduce((s, o) => s + o[1], 0);
+  const scale = (H - gap * (outs.length - 1)) / Math.max(totalRight, income);
+  const leftH = income * scale;
+  const leftY = (H - leftH) / 2;
+  let y = 0, ly = leftY;
+  const x0 = 120, x1 = W - labelW;
+  const parts = [];
+  let lastLabelY = -Infinity;
+  outs.forEach(([label, v, key]) => {
+    const h = Math.max(v * scale, 1.5);
+    const color = key === 'left' ? 'var(--line-2)' : slotColor(key);
+    const lh = Math.min(v * scale, leftH - (ly - leftY));
+    const c = (x0 + nodeW + x1) / 2;
+    const tip = `<b>${esc(label)}</b><br>${M.money(v)} · ${Math.round((v / income) * 100)}% of take-home`;
+    parts.push(`<path d="M${x0 + nodeW},${ly} C${c},${ly} ${c},${y} ${x1},${y} L${x1},${y + h} C${c},${y + h} ${c},${ly + lh} ${x0 + nodeW},${ly + lh} Z" fill="${color}" opacity="${key === 'left' ? 0.35 : 0.28}" data-tip="${esc(tip)}"/>`);
+    parts.push(`<rect x="${x1}" y="${y}" width="${nodeW}" height="${h}" rx="3" fill="${color}" data-tip="${esc(tip)}"/>`);
+    const labelY = Math.max(y + h / 2 + 4, lastLabelY + 17);
+    lastLabelY = labelY;
+    if (Math.abs(labelY - (y + h / 2 + 4)) > 3) {
+      parts.push(`<path d="M${x1 + nodeW + 1},${y + h / 2} L${x1 + nodeW + 5},${labelY - 4}" stroke="#4A5562" stroke-width="1" fill="none"/>`);
+    }
+    parts.push(`<text x="${x1 + nodeW + 8}" y="${labelY}" font-size="12.5" font-weight="700" fill="#C9CED6">${esc(label)} <tspan fill="#F3F1EA" font-weight="800">${M.money0(v)}</tspan></text>`);
+    y += h + gap;
+    ly += lh;
+  });
+  const leftLabel = outlook ? 'Take-home' : 'Income';
+  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${leftLabel} ${M.money0(income)} split into bills, spending, savings and what's left">
+      <rect x="${x0}" y="${leftY}" width="${nodeW}" height="${leftH}" rx="3" fill="var(--mint)"/>
+      <text x="${x0 - 10}" y="${leftY + leftH / 2 - 6}" font-size="12.5" font-weight="700" fill="#C9CED6" text-anchor="end">${leftLabel}</text>
+      <text x="${x0 - 10}" y="${leftY + leftH / 2 + 12}" font-size="15" font-weight="800" fill="#F3F1EA" text-anchor="end">${M.money0(income)}</text>
+      ${parts.join('')}
+    </svg>
+    <p class="small muted">${outlook ? `Expected take-home for the month (${M.money0(outlook.received)} received so far).` : 'Income logged this month.'} Bills count only your share of split bills.</p>`;
+}
+
+// ---------- transactions ----------
+function viewTransactions(el, d) {
+  const f = state.txFilter;
+  const months = [...new Set(d.transactions.map((t) => `${t.date.getFullYear()}-${t.date.getMonth()}`))]
+    .map((k) => { const [y, m] = k.split('-').map(Number); return new Date(y, m, 1); }).sort((a, b) => b - a);
+  const categories = [...new Set(d.transactions.map((t) => t.category))].sort();
+  el.innerHTML = `
+    <div class="card">
+      <div class="toolbar">
+        <input class="input search" id="q" type="search" placeholder="Search name, category or note" value="${esc(f.q)}" aria-label="Search transactions">
+        <select class="input" id="month" aria-label="Month">
+          <option value="this" ${f.month === 'this' ? 'selected' : ''}>This month</option>
+          <option value="all" ${f.month === 'all' ? 'selected' : ''}>All time</option>
+          ${months.map((m) => `<option value="${m.getTime()}" ${String(f.month) === String(m.getTime()) ? 'selected' : ''}>${m.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</option>`).join('')}
+        </select>
+        <select class="input" id="type" aria-label="Type">
+          <option value="all">Money in and out</option>
+          <option value="expense" ${f.type === 'expense' ? 'selected' : ''}>Spent</option>
+          <option value="income" ${f.type === 'income' ? 'selected' : ''}>Income</option>
+          <option value="repeats" ${f.type === 'repeats' ? 'selected' : ''}>Repeating</option>
+        </select>
+        <select class="input" id="category" aria-label="Category">
+          <option value="all">All categories</option>
+          ${categories.map((c) => `<option ${f.category === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}
+        </select>
+        <button class="btn" id="export">Export CSV</button>
+      </div>
+      <div id="tx-table"></div>
+    </div>`;
+  const update = () => drawTxTable(el.querySelector('#tx-table'), d);
+  el.querySelector('#q').addEventListener('input', (e) => { f.q = e.target.value; update(); });
+  el.querySelector('#month').addEventListener('change', (e) => { f.month = e.target.value; update(); });
+  el.querySelector('#type').addEventListener('change', (e) => { f.type = e.target.value; update(); });
+  el.querySelector('#category').addEventListener('change', (e) => { f.category = e.target.value; update(); });
+  el.querySelector('#export').addEventListener('click', () => exportCSV(filteredTx(d)));
+  update();
+}
+
+function filteredTx(d) {
+  const f = state.txFilter;
+  const now = new Date();
+  const q = f.q.trim().toLowerCase();
+  let list = d.transactions.filter((t) => {
+    if (f.month === 'this' && !M.inMonth(t.date, now)) return false;
+    if (f.month !== 'this' && f.month !== 'all' && !M.inMonth(t.date, new Date(Number(f.month)))) return false;
+    if (f.type === 'repeats' && !(M.isTemplate(t) || M.isGenerated(t))) return false;
+    if ((f.type === 'expense' || f.type === 'income') && t.type !== f.type) return false;
+    if (f.category !== 'all' && t.category !== f.category) return false;
+    if (q && !`${t.title} ${t.category} ${t.notes}`.toLowerCase().includes(q)) return false;
+    return true;
+  });
+  const key = f.sort;
+  list.sort((a, b) => {
+    const va = key === 'amount' ? a.amount : key === 'title' ? (a.title || '').toLowerCase() : key === 'category' ? a.category : a.date.getTime();
+    const vb = key === 'amount' ? b.amount : key === 'title' ? (b.title || '').toLowerCase() : key === 'category' ? b.category : b.date.getTime();
+    return (va < vb ? -1 : va > vb ? 1 : 0) * f.dir;
+  });
+  return list;
+}
+
+function drawTxTable(host, d) {
+  const f = state.txFilter;
+  const list = filteredTx(d);
+  const spent = list.filter(M.isSpending).reduce((s, t) => s + t.amount, 0);
+  const income = list.filter((t) => t.type === 'income').reduce((s, t) => s + t.amount, 0);
+  const arrow = (k) => (f.sort === k ? (f.dir < 0 ? ' ↓' : ' ↑') : '');
+  host.innerHTML = list.length ? `
+    <div class="table-wrap"><table>
+      <thead><tr>
+        <th data-sort="date">Date${arrow('date')}</th><th data-sort="title">Name${arrow('title')}</th>
+        <th data-sort="category">Category${arrow('category')}</th><th>Details</th><th class="r" data-sort="amount">Amount${arrow('amount')}</th>
+      </tr></thead>
+      <tbody>${list.slice(0, 600).map((t) => {
+        const s = M.share(t);
+        const details = [M.isTemplate(t) ? `<span class="pill">Repeats ${esc((t.recurringFrequency || '').toLowerCase())}</span>` : M.isGenerated(t) ? '<span class="pill">Repeating</span>' : '',
+          s < 0.999 ? `<span class="pill mint">Your ${M.sharePhrase(s)} of ${M.money(t.fullAmount)}</span>` : '',
+          t.notes ? `<span class="muted small">${esc(t.notes)}</span>` : ''].filter(Boolean).join(' ');
+        return `<tr><td class="num">${fmtDay(t.date, { month: 'short', day: 'numeric', year: 'numeric' })}</td><td class="t">${esc(t.title || t.category)}</td>
+          <td>${esc(M.shortName(t.category))}</td><td>${details}</td>
+          <td class="r amt ${t.type === 'income' ? 'in' : ''}">${t.type === 'income' ? '+' : '−'}${M.money(t.amount)}</td></tr>`;
+      }).join('')}</tbody></table></div>
+    <div class="totals"><span><b>${list.length}</b> entries${list.length > 600 ? ' (first 600 shown)' : ''}</span><span>Spent <b>${M.money(spent)}</b></span><span>Income <b>${M.money(income)}</b></span></div>`
+    : '<div class="empty-state">No entries match</div>';
+  host.querySelectorAll('th[data-sort]').forEach((th) => th.addEventListener('click', () => {
+    const k = th.dataset.sort;
+    if (f.sort === k) f.dir *= -1; else { f.sort = k; f.dir = k === 'title' || k === 'category' ? 1 : -1; }
+    drawTxTable(host, d);
+  }));
+}
+
+function exportCSV(list) {
+  const rows = [['Date', 'Name', 'Category', 'Type', 'Amount', 'Your share of', 'Notes']];
+  for (const t of list) rows.push([t.date.toISOString().slice(0, 10), t.title, t.category, t.type, t.amount.toFixed(2), t.fullAmount ? t.fullAmount.toFixed(2) : '', t.notes || '']);
+  const csv = rows.map((r) => r.map((c) => `"${String(c ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+  a.download = `zentavo-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+}
+
+// ---------- bills ----------
+function viewBills(el, d) {
+  const now = new Date();
+  const lines = M.billLines(d, now);
+  const counted = lines.filter((l) => l.counted);
+  const total = counted.reduce((s, l) => s + l.total, 0);
+  const saved = lines.filter((l) => l.counted && l.fullTotal).reduce((s, l) => s + (l.fullTotal - l.total), 0);
+  const today = M.startOfDay(now);
+  const events = M.upcomingEvents(d, today, M.addDays(today, 31)).filter((e) => !e.isIncome);
+  const p = M.pace(d, now);
+  const pays = p ? M.projectedPaydays(p, M.addDays(today, 31)) : [];
+  const timeline = [...events.map((e) => ({ ...e, kind: 'bill' })), ...pays.map((x) => ({ date: x.day, title: 'Payday', amount: x.amount, kind: 'pay' }))].sort((a, b) => a.date - b.date);
+  el.innerHTML = `
+    <section class="grid kpis" style="grid-template-columns:repeat(3,1fr)">
+      <div class="card"><h2>Bills this month</h2><div class="kpi-val">${M.money(total)}</div><div class="kpi-sub">${counted.length} counted in your daily limit</div></div>
+      <div class="card"><h2>Covered by others</h2><div class="kpi-val">${M.money(saved)}</div><div class="kpi-sub">the other share of split bills, not counted as yours</div></div>
+      <div class="card"><h2>Next 31 days</h2><div class="kpi-val">${M.money(events.reduce((s, e) => s + e.amount, 0))}</div><div class="kpi-sub">${events.length} bills due</div></div>
+    </section>
+    <section class="grid halves">
+      <div class="card"><h2>This month's bills</h2>
+        <div class="rows">${lines.map((l) => `<div class="row">
+          <span class="ic">${svg(catIcon(l.category))}</span>
+          <div class="grow"><div class="t">${esc(l.title)}</div>
+            <div class="s">${esc(l.kind)}${l.times > 1 ? ` · ${l.times} times` : ''}${l.fullTotal ? ` of ${M.money(l.fullTotal)}` : ''}</div>
+            ${l.note ? `<div class="note">${esc(l.note)}</div>` : ''}</div>
+          <span class="amt ${l.counted ? '' : 'muted'}">${l.counted ? M.money(l.total) : 'Not counted'}</span></div>`).join('') || '<div class="empty-state">No repeating bills</div>'}</div>
+      </div>
+      <div class="card"><h2>Coming up</h2>
+        <div class="rows">${timeline.map((e) => `<div class="row">
+          <span class="ic">${svg(e.kind === 'pay' ? 'coin' : catIcon(e.transaction?.category))}</span>
+          <div class="grow"><div class="t">${esc(e.title)}</div><div class="s">${fmtDay(e.date, { weekday: 'short', month: 'short', day: 'numeric' })}${e.kind === 'bill' ? ` · ${esc(e.detail)}` : ' · expected'}</div></div>
+          <span class="amt ${e.kind === 'pay' ? 'in' : ''}">${e.kind === 'pay' ? '+' : '−'}${M.money(e.amount)}</span></div>`).join('') || '<div class="empty-state">Nothing in the next month</div>'}</div>
+      </div>
+    </section>`;
+}
+
+// ---------- paychecks ----------
+function viewPaychecks(el, d) {
+  const now = new Date();
+  const p = M.pace(d, now);
+  if (!p) {
+    el.innerHTML = `<div class="card"><div class="empty-state">No paychecks logged yet. On your iPhone, Zentavo logs them from your bank's deposit email, or add one with + → Income.</div></div>`;
+    return;
+  }
+  const outlook = M.monthOutlook(d, p, now, now);
+  const extra = M.nextExtraPaydayMonth(p, now);
+  const days = M.daysInMonth(now);
+  const today = M.startOfDay(now);
+  const history = p.history.filter((x) => x.day >= M.addDays(today, -112));
+  const future = M.projectedPaydays(p, M.addDays(today, 29)).slice(0, 4);
+  const cols = [...history.map((x) => ({ ...x, projected: false })), ...future.map((x) => ({ ...x, projected: true }))];
+  const max = Math.max(...cols.map((c) => c.amount), 1);
+  const year = [];
+  const futureYear = M.projectedPaydays(p, M.addMonths(M.monthStart(now), 13));
+  for (let k = 0; k < 12; k++) {
+    const m = M.addMonths(M.monthStart(now), k);
+    const inM = futureYear.filter((x) => M.inMonth(x.day, m));
+    const got = k === 0 ? outlook.receivedCount : 0;
+    year.push({ m, count: inM.length + got, total: inM.reduce((s, x) => s + x.amount, 0) + (k === 0 ? outlook.received : 0) });
+  }
+  el.innerHTML = `
+    <section class="grid kpis">
+      <div class="card"><h2>Take-home pace</h2><div class="hero-num">${M.money0(p.perDay * days)}</div>
+        <div class="kpi-sub">a month after taxes · ${p.planned ? 'from a repeating income entry, not real deposits' : `based on your last ${p.counted} paychecks`}</div></div>
+      <div class="card"><h2>Payday</h2><div class="kpi-val">${esc(p.scheduleName)}</div><div class="kpi-sub">last ${M.money(p.last.amount)} on ${fmtDay(p.last.day, { weekday: 'short', month: 'short', day: 'numeric' })}</div></div>
+      <div class="card"><h2>Next</h2><div class="kpi-val">${fmtDay(p.next, { weekday: 'short', month: 'short', day: 'numeric' })}</div><div class="kpi-sub">about <b>${M.money(p.nextAmount)}</b></div></div>
+      <div class="card"><h2>This month</h2><div class="kpi-val">${M.money0(outlook.received)}</div><div class="kpi-sub">in · about <b>${M.money0(outlook.expected)}</b> by month end · ${outlook.paydayCount} paydays</div></div>
+    </section>
+    <section class="grid two">
+      <div class="card"><h2>Paychecks <span class="legend" style="margin:0"><span><i class="sw" style="background:var(--mint)"></i>Received</span><span><i class="sw" style="box-shadow:inset 0 0 0 2px var(--mint)"></i>Expected</span></span></h2>
+        <div class="cols">${cols.map((c) => `<div class="col ${c.projected ? 'projected' : ''}" data-tip="<b>${fmtDay(c.day, { weekday: 'short', month: 'short', day: 'numeric' })}</b><br>${c.projected ? 'about ' : ''}${M.money(c.amount)}${c.projected ? ' expected' : ''}"><div class="colbar" style="height:${(c.amount / max) * 100}%"></div></div>`).join('')}</div>
+        <div class="col-labels">${cols.map((c) => `<span>${c.day.getMonth() + 1}/${c.day.getDate()}</span>`).join('')}</div>
+        <p class="small muted" style="margin-top:12px">Weekly pay from two jobs alternates, so each coming check is expected to match the one two weeks before it.</p>
+      </div>
+      <div class="card"><h2>The next 12 months</h2>
+        <div class="rows">${year.map((y) => `<div class="kv"><span class="k">${y.m.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</span>
+          <span class="v">${y.count} paydays · ${M.money0(y.total)}${y.count > p.usual ? ' <span class="pill mint">Extra payday</span>' : ''}</span></div>`).join('')}</div>
+        ${extra ? `<p class="small muted" style="margin-top:10px">${extra.month.toLocaleDateString('en-US', { month: 'long' })} has ${extra.count} paydays. The extra one isn't needed for regular bills.</p>` : ''}
+      </div>
+    </section>`;
+}
+
+// ---------- goals ----------
+function viewGoals(el, d) {
+  el.innerHTML = `
+    <section class="grid halves">
+      <div class="card"><h2>Savings goals</h2>
+        ${d.goals.length ? d.goals.map((g) => `<div class="progress-row"><div class="top"><b>${esc(g.name)}</b><span class="num">${M.money0(g.currentAmount)} of ${M.money0(g.targetAmount)}</span></div>
+          <div class="bar"><span style="width:${pct(g.currentAmount, g.targetAmount)}%"></span></div>
+          <div class="small muted">${Math.round(pct(g.currentAmount, g.targetAmount))}% saved${g.deadline ? ` · by ${fmtDay(g.deadline, { month: 'short', year: 'numeric' })}` : ''}</div></div>`).join('') : '<div class="empty-state">No savings goals</div>'}
+      </div>
+      <div class="card"><h2>Debts</h2>
+        ${d.debts.length ? d.debts.map((x) => `<div class="progress-row"><div class="top"><b>${esc(x.name)}</b><span class="num">${M.money(x.remainingBalance)} left</span></div>
+          <div class="bar"><span style="width:${pct(x.amountPaid, x.totalAmount)}%"></span></div>
+          <div class="small muted">${Math.round(pct(x.amountPaid, x.totalAmount))}% paid${x.minimumPayment ? ` · ${M.money(x.minimumPayment)} minimum` : ''}${x.interestRate ? ` · ${x.interestRate}% APR` : ''}</div></div>`).join('') : '<div class="empty-state">No debts. Nice.</div>'}
+      </div>
+    </section>`;
+}
+
+window.addEventListener('hashchange', () => { state.view = location.hash.slice(1) || 'overview'; if (state.data) render(); });
+boot();

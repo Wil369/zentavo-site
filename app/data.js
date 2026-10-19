@@ -1,0 +1,218 @@
+// Loads the person's Zentavo data from their private iCloud (CloudKit JS), or sample data.
+import { CONFIG } from './config.js';
+import { addDays, addMonths, monthStart, startOfDay } from './money.js';
+
+const CK_SCRIPT = 'https://cdn.apple-cloudkit.com/ck/2/cloudkit.js';
+
+function loadScript(src) {
+  return new Promise((resolve, reject) => {
+    if (window.CloudKit) return resolve();
+    const s = document.createElement('script');
+    s.src = src; s.async = true;
+    s.onload = () => resolve();
+    s.onerror = () => reject(new Error('Couldn\'t reach Apple\'s CloudKit service.'));
+    document.head.appendChild(s);
+  });
+}
+
+export const cloudConfigured = () => !!CONFIG.apiToken;
+
+/** Sets up Sign in with Apple. Resolves with the container once a user is signed in. */
+export async function connect({ onSignedOut }) {
+  await loadScript(CK_SCRIPT);
+  window.CloudKit.configure({
+    locale: 'en-us',
+    containers: [{
+      containerIdentifier: CONFIG.containerIdentifier,
+      apiTokenAuth: {
+        apiToken: CONFIG.apiToken,
+        persist: true,
+        signInButton: { id: 'apple-sign-in-button', theme: 'white' },
+        signOutButton: { id: 'apple-sign-out-button', theme: 'black' },
+      },
+      environment: CONFIG.environment,
+    }],
+  });
+  const container = window.CloudKit.getDefaultContainer();
+  const user = await container.setUpAuth();
+  if (user) {
+    container.whenUserSignsOut().then(() => onSignedOut?.());
+    return container;
+  }
+  await container.whenUserSignsIn();
+  container.whenUserSignsOut().then(() => onSignedOut?.());
+  return container;
+}
+
+/** Every record in the SwiftData zone, via zone changes (needs no query indexes). */
+export async function fetchAll(container, onProgress) {
+  const db = container.privateCloudDatabase;
+  const records = [];
+  let syncToken;
+  let more = true;
+  let rounds = 0;
+  while (more && rounds < 200) {
+    rounds++;
+    const request = { zoneID: { zoneName: CONFIG.zoneName } };
+    if (syncToken) request.syncToken = syncToken;
+    const response = await db.fetchRecordZoneChanges([request]);
+    if (response.hasErrors) {
+      const err = response.errors[0];
+      throw new Error(err?.reason || err?.serverErrorCode || 'iCloud refused the request.');
+    }
+    const zone = response.zones[0];
+    for (const r of zone.records || []) if (!r.deleted) records.push(r);
+    syncToken = zone.syncToken;
+    more = !!zone.moreComing;
+    onProgress?.(records.length);
+  }
+  return records;
+}
+
+// ---------- CloudKit record → plain objects ----------
+// SwiftData mirrors each model as record type "CD_<Model>" with fields "CD_<property>".
+function field(r, name) {
+  const f = r.fields?.[`CD_${name}`];
+  return f ? f : undefined;
+}
+function val(r, name) {
+  const f = field(r, name);
+  if (!f) return undefined;
+  return f.value;
+}
+const num = (r, n, d = 0) => { const v = val(r, n); return typeof v === 'number' ? v : d; };
+const numOpt = (r, n) => { const v = val(r, n); return typeof v === 'number' ? v : null; };
+const str = (r, n, d = '') => { const v = val(r, n); return typeof v === 'string' ? v : d; };
+const bool = (r, n) => { const v = val(r, n); return v === 1 || v === true; };
+const date = (r, n) => { const v = val(r, n); return typeof v === 'number' ? new Date(v) : null; };
+
+/** Enums may arrive as their raw string or as encoded bytes; either way, find the raw value. */
+function enumVal(r, n, options) {
+  const f = field(r, n);
+  if (!f || f.value == null) return null;
+  let text = '';
+  if (typeof f.value === 'string') {
+    text = f.value;
+    if (f.type === 'BYTES') { try { text = atob(f.value); } catch { /* keep */ } }
+  }
+  const lower = text.toLowerCase();
+  return options.find((o) => lower === o.toLowerCase()) ?? options.find((o) => lower.includes(o.toLowerCase())) ?? null;
+}
+
+export function mapRecords(records) {
+  const byType = new Map();
+  for (const r of records) {
+    if (!byType.has(r.recordType)) byType.set(r.recordType, []);
+    byType.get(r.recordType).push(r);
+  }
+  const counts = Object.fromEntries([...byType].map(([k, v]) => [k, v.length]));
+  const of = (t) => byType.get(`CD_${t}`) || [];
+
+  const transactions = of('Transaction').map((r) => {
+    const type = enumVal(r, 'type', ['income', 'expense']) || 'expense';
+    return {
+      id: str(r, 'id', r.recordName),
+      title: str(r, 'title'),
+      amount: num(r, 'amount'),
+      type,
+      category: str(r, 'category', 'Other'),
+      date: date(r, 'date') || new Date(),
+      notes: str(r, 'notes'),
+      isRecurring: bool(r, 'isRecurring'),
+      recurringFrequency: enumVal(r, 'recurringFrequency', ['Weekly', 'Biweekly', 'Monthly']),
+      recurringTemplateID: str(r, 'recurringTemplateID') || null,
+      fullAmount: numOpt(r, 'fullAmount'),
+    };
+  }).filter((t) => t.amount > 0 || t.title);
+
+  const settingsList = of('AppSettings').map((r) => ({
+    monthlyBudgetGoal: num(r, 'monthlyBudgetGoal', 2000),
+    dailyLimit: num(r, 'dailyLimit', 0),
+    dailyLimitMode: str(r, 'dailyLimitMode'),
+    paySchedule: str(r, 'paySchedule'),
+    updatedAt: date(r, 'updatedAt') || new Date(0),
+  }));
+  settingsList.sort((a, b) => b.updatedAt - a.updatedAt);
+
+  const debts = of('DebtItem').map((r) => {
+    const total = num(r, 'totalAmount'), paid = num(r, 'amountPaid');
+    return { name: str(r, 'name'), totalAmount: total, amountPaid: paid, remainingBalance: Math.max(total - paid, 0),
+      minimumPayment: numOpt(r, 'minimumPayment'), dueDate: date(r, 'dueDate'), interestRate: numOpt(r, 'interestRate') };
+  });
+
+  const goals = of('SavingsGoal').map((r) => ({
+    name: str(r, 'name'), targetAmount: num(r, 'targetAmount'), currentAmount: num(r, 'currentAmount'),
+    deadline: date(r, 'deadline'), isArchived: bool(r, 'isArchived'),
+  })).filter((g) => !g.isArchived);
+
+  const budgets = of('CategoryBudget').map((r) => ({ category: str(r, 'category'), limit: num(r, 'limit') }));
+
+  return { transactions, settings: settingsList[0] || null, debts, goals, budgets, counts, source: 'icloud' };
+}
+
+// ---------- sample data (for visitors, and before iCloud is connected) ----------
+function seeded(seed) {
+  let s = seed;
+  return () => { s = (s * 16807) % 2147483647; return (s - 1) / 2147483646; };
+}
+
+export function sampleData(now = new Date()) {
+  const rand = seeded(42);
+  const tx = [];
+  let id = 0;
+  const add = (o) => tx.push({ id: `s${id++}`, notes: '', isRecurring: false, recurringFrequency: null,
+    recurringTemplateID: null, fullAmount: null, ...o });
+  const today = startOfDay(now);
+  const start = addMonths(monthStart(today), -2);
+
+  // Two jobs, each every two weeks, landing on alternate Wednesdays.
+  let wed = new Date(start);
+  while (wed.getDay() !== 3) wed = addDays(wed, 1);
+  for (let i = 0; wed <= now; i++, wed = addDays(wed, 7)) {
+    add({ title: 'Paycheck', amount: i % 2 ? 1186.42 : 604.18 + Math.round(rand() * 6000) / 100, type: 'income', category: 'Salary', date: new Date(wed.getTime() + 13 * 3600e3) });
+  }
+  // Bills (templates dated at their first occurrence; past copies generated).
+  const bill = (title, amount, category, day, full) => {
+    const first = new Date(start.getFullYear(), start.getMonth(), day, 9);
+    const t = { title, amount, type: 'expense', category, date: first, isRecurring: true, recurringFrequency: 'Monthly', fullAmount: full ?? null };
+    add(t);
+    const tid = tx[tx.length - 1].id;
+    for (let k = 1; k <= 3; k++) {
+      const d = addMonths(first, k);
+      if (d > now) break;
+      add({ title, amount, type: 'expense', category, date: d, recurringTemplateID: tid, fullAmount: full ?? null });
+    }
+  };
+  bill('Rent', 950, 'Housing', 1);
+  bill('Electric', 46.2, 'Housing', 24, 92.4);
+  bill('Internet', 37.5, 'Housing', 25, 75);
+  bill('Phone', 54.83, 'Subscriptions', 26, 109.65);
+  bill('Streaming', 15.49, 'Subscriptions', 12);
+  bill('Gym', 29.99, 'Personal Care', 5);
+
+  // Everyday spending.
+  const places = [
+    ['Uber', 'Transportation', 9, 18], ['Trader Joe\'s', 'Food & Groceries', 24, 68], ['Starbucks', 'Food & Groceries', 5, 9],
+    ['Chipotle', 'Food & Groceries', 11, 16], ['Target', 'Shopping', 18, 95], ['Shell', 'Transportation', 32, 48],
+    ['AMC Theatres', 'Entertainment', 14, 28], ['CVS', 'Personal Care', 8, 26], ['Amazon', 'Shopping', 12, 60],
+  ];
+  for (let d = new Date(start); d <= today; d = addDays(d, 1)) {
+    const n = rand() < 0.22 ? 0 : 1 + Math.floor(rand() * 2.4);
+    for (let i = 0; i < n; i++) {
+      const [title, category, lo, hi] = places[Math.floor(rand() * places.length)];
+      const amount = Math.round((lo + rand() * (hi - lo)) * 100) / 100;
+      add({ title, amount, type: 'expense', category, date: new Date(d.getTime() + (8 + Math.floor(rand() * 13)) * 3600e3) });
+    }
+  }
+  add({ title: 'Savings: Emergency fund', amount: 150, type: 'expense', category: 'Savings', date: addDays(monthStart(today), 2) });
+
+  return {
+    transactions: tx,
+    settings: { monthlyBudgetGoal: 2600, dailyLimit: 0, dailyLimitMode: 'paychecks', paySchedule: 'weekly:4', updatedAt: now },
+    debts: [{ name: 'Credit card', totalAmount: 1800, amountPaid: 640, remainingBalance: 1160, minimumPayment: 45, dueDate: new Date(today.getFullYear(), today.getMonth(), 16), interestRate: 24.9 }],
+    goals: [{ name: 'Emergency fund', targetAmount: 3000, currentAmount: 1240 }, { name: 'Trip home', targetAmount: 1200, currentAmount: 410 }],
+    budgets: [],
+    counts: {},
+    source: 'sample',
+  };
+}

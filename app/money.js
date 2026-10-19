@@ -1,0 +1,383 @@
+// The same money math as the iPhone app (DailySpending, Paychecks, BillSplit,
+// MoneyFacts.upcomingEvents), so the web shows exactly the numbers the phone does.
+
+export const SAVINGS = 'Savings';
+export const DEBT = 'Debt Payments';
+const DAY = 86_400_000;
+
+// ---------- dates ----------
+export const startOfDay = (d) => { const x = new Date(d); x.setHours(0, 0, 0, 0); return x; };
+export const addDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
+export function addMonths(d, n) {
+  // Like Calendar.date(byAdding: .month): Jan 31 + 1 month = Feb 28/29.
+  const x = new Date(d);
+  const day = x.getDate();
+  x.setDate(1);
+  x.setMonth(x.getMonth() + n);
+  const last = new Date(x.getFullYear(), x.getMonth() + 1, 0).getDate();
+  x.setDate(Math.min(day, last));
+  return x;
+}
+export const monthStart = (d) => new Date(d.getFullYear(), d.getMonth(), 1);
+export const monthEnd = (d) => new Date(d.getFullYear(), d.getMonth() + 1, 1); // exclusive
+export const daysInMonth = (d) => new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+export const sameDay = (a, b) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+export const inMonth = (d, m) => d.getFullYear() === m.getFullYear() && d.getMonth() === m.getMonth();
+const dayDiff = (a, b) => Math.round((startOfDay(b) - startOfDay(a)) / DAY);
+
+// ---------- what an entry is ----------
+export const isTemplate = (t) => t.isRecurring && !!t.recurringFrequency && !t.recurringTemplateID;
+export const isGenerated = (t) => !!t.recurringTemplateID;
+export const isSpending = (t) => t.type === 'expense' && t.category !== SAVINGS;
+export const isBill = (t) => isTemplate(t) || isGenerated(t) || t.category === DEBT;
+export const countsForDay = (t) => isSpending(t) && !isBill(t);
+export const share = (t) => (t.fullAmount && t.fullAmount > 0 ? Math.min(Math.max(t.amount / t.fullAmount, 0), 1) : 1);
+export function sharePhrase(s) {
+  if (s > 0.49 && s < 0.51) return 'half';
+  if (s > 0.32 && s < 0.34) return 'a third';
+  if (s > 0.24 && s < 0.26) return 'a quarter';
+  return `${Math.round(s * 100)}%`;
+}
+
+const SHORT = {
+  'Food & Groceries': 'Food', Transportation: 'Transport', Subscriptions: 'Subs', Entertainment: 'Fun',
+  'Debt Payments': 'Debt', 'Personal Care': 'Personal', 'Side Hustle': 'Hustle', Investments: 'Invest',
+};
+export const shortName = (c) => SHORT[c] || c;
+
+// ---------- repeating entries ----------
+function stepDate(start, freq, k) {
+  if (freq === 'Weekly') return addDays(start, 7 * k);
+  if (freq === 'Biweekly') return addDays(start, 14 * k);
+  return addMonths(start, k);
+}
+
+export function occurrences(start, freq, through) {
+  const limit = addDays(startOfDay(through), 1);
+  const out = [];
+  for (let k = 1; k <= 2000; k++) {
+    const next = stepDate(start, freq, k);
+    if (next >= limit) break;
+    out.push(next);
+  }
+  return out;
+}
+
+function nextDueDate(debt, onOrAfter) {
+  if (!debt.dueDate) return null;
+  const floor = startOfDay(onOrAfter);
+  if (debt.dueDate >= floor) return debt.dueDate;
+  for (let m = 1; m <= 600; m++) {
+    const next = addMonths(debt.dueDate, m);
+    if (next >= floor) return next;
+  }
+  return null;
+}
+
+/** Repeating entries and debt payments due between two dates (end exclusive), in order. */
+export function upcomingEvents(data, from, to) {
+  const events = [];
+  for (const t of data.transactions) {
+    if (!isTemplate(t)) continue;
+    const dates = [t.date, ...occurrences(t.date, t.recurringFrequency, to)];
+    for (const date of dates) {
+      if (date >= from && date < to) {
+        events.push({ date, title: t.title, amount: t.amount, isIncome: t.type === 'income',
+          detail: t.recurringFrequency.toLowerCase(), transaction: t });
+      }
+    }
+  }
+  for (const debt of data.debts) {
+    if (debt.remainingBalance <= 0) continue;
+    let cursor = from;
+    for (let i = 0; i < 120; i++) {
+      const date = nextDueDate(debt, cursor);
+      if (!date || date >= to) break;
+      events.push({ date, title: debt.name, amount: Math.min(debt.minimumPayment ?? debt.remainingBalance, debt.remainingBalance),
+        isIncome: false, detail: 'debt payment', transaction: null, debt });
+      cursor = addDays(startOfDay(date), 1);
+    }
+  }
+  return events.sort((a, b) => a.date - b.date);
+}
+
+// ---------- bills ----------
+const EVERYDAY = new Set(['Food & Groceries', 'Transportation', 'Shopping', 'Entertainment', 'Personal Care']);
+
+const BUDGET_WORDS = new Set(['food', 'foods', 'groceries', 'grocery', 'transportation', 'transport', 'gas', 'shopping',
+  'fun', 'entertainment', 'personal', 'personal care', 'eating out', 'dining', 'restaurants', 'spending', 'misc']);
+const looksLikeBudgetName = (t) => {
+  const name = (t.title || '').trim().toLowerCase();
+  return !name || BUDGET_WORDS.has(name) || name === t.category.toLowerCase() || name === shortName(t.category).toLowerCase();
+};
+
+export function isBudgetLike(template, transactions, now = new Date()) {
+  if (!isTemplate(template) || template.type !== 'expense' || !EVERYDAY.has(template.category)) return false;
+  // "Transportation $400" is a budget; "Gym $30" in the same kind of category is a real bill.
+  if (!looksLikeBudgetName(template)) return false;
+  const since = new Date(now.getTime() - 45 * DAY);
+  return transactions.some((t) => t.type === 'expense' && t.category === template.category && !isTemplate(t)
+    && !isGenerated(t) && t.date >= since && t.date <= now);
+}
+
+export function billLines(data, month) {
+  const from = monthStart(month), to = monthEnd(month);
+  const lines = [];
+  const repeating = upcomingEvents(data, from, to).filter((e) => !e.isIncome && e.transaction);
+  const groups = new Map();
+  for (const e of repeating) {
+    if (!groups.has(e.title)) groups.set(e.title, []);
+    groups.get(e.title).push(e);
+  }
+  for (const [title, events] of groups) {
+    const t = events[0].transaction;
+    const total = events.reduce((s, e) => s + e.amount, 0);
+    const s = share(t);
+    const kind = `Repeats ${events[0].detail}` + (s < 0.999 ? ` · your ${sharePhrase(s)}` : '');
+    if (isBudgetLike(t, data.transactions)) {
+      lines.push({ title, total, times: events.length, kind, counted: false, budgetLike: true, category: t.category,
+        note: `A spending budget, not a bill: what you spend on ${shortName(t.category).toLowerCase()} is already counted day by day.` });
+      continue;
+    }
+    lines.push({ title, total, times: events.length, kind, counted: true, share: s, category: t.category,
+      fullTotal: s < 0.999 ? total / s : null, firstDate: events[0].date });
+  }
+  for (const debt of data.debts) {
+    if (debt.remainingBalance <= 0) continue;
+    const due = nextDueDate(debt, from);
+    if (!due || due >= to) continue;
+    if (debt.minimumPayment && debt.minimumPayment > 0) {
+      lines.push({ title: debt.name, total: Math.min(debt.minimumPayment, debt.remainingBalance), times: 1, kind: 'Debt payment', counted: true, category: DEBT, firstDate: due });
+    } else {
+      lines.push({ title: debt.name, total: 0, times: 1, kind: 'Debt', counted: false, note: 'No minimum payment set, so it isn\'t counted.' });
+    }
+  }
+  return lines.sort((a, b) => b.total - a.total);
+}
+
+export const billsInMonth = (data, month) => billLines(data, month).filter((l) => l.counted).reduce((s, l) => s + l.total, 0);
+
+// ---------- this month ----------
+export function monthlyFigures(data, now = new Date()) {
+  const last = addMonths(monthStart(now), -1);
+  const thisTx = data.transactions.filter((t) => inMonth(t.date, now));
+  const lastTx = data.transactions.filter((t) => inMonth(t.date, last));
+  const sum = (arr) => arr.reduce((s, t) => s + t.amount, 0);
+  const expenses = sum(thisTx.filter(isSpending));
+  const saved = sum(thisTx.filter((t) => t.type === 'expense' && t.category === SAVINGS));
+  const actualIncome = sum(thisTx.filter((t) => t.type === 'income'));
+  const previousIncome = sum(lastTx.filter((t) => t.type === 'income'));
+  const income = actualIncome > 0 ? actualIncome : previousIncome;
+  const budget = data.settings?.monthlyBudgetGoal ?? 0;
+  const leftToSpend = budget > 0 ? budget - expenses : income - expenses;
+  return { expenses, saved, actualIncome, income, budget, leftToSpend };
+}
+
+// ---------- paychecks ----------
+const PAY = new Set(['Salary', 'Freelance', 'Side Hustle']);
+export const isPay = (t) => t.type === 'income' && PAY.has(t.category);
+const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+export function parseSchedule(raw) {
+  const [kind, n] = (raw || '').split(':');
+  const num = Number(n);
+  if (kind === 'weekly' && num >= 1 && num <= 7) return { kind, weekday: num, cadence: 7, label: `Every ${WEEKDAYS[num - 1]}` };
+  if (kind === 'biweekly' && num >= 1 && num <= 7) return { kind, weekday: num, cadence: 14, label: `Every other ${WEEKDAYS[num - 1]}` };
+  if (kind === 'twiceMonthly') return { kind, cadence: 15, label: '15th and last day' };
+  if (kind === 'monthly' && num >= 1 && num <= 31) return { kind, day: num, cadence: 30, label: `Monthly on day ${num}` };
+  return { kind: 'learn', cadence: null, label: 'Learned from your paychecks' };
+}
+
+function payEntries(transactions, schedule, now) {
+  const start = addDays(startOfDay(now), -120);
+  const recent = transactions.filter((t) => isPay(t) && t.date >= start && t.date <= now);
+  const actual = recent.filter((t) => !isTemplate(t) && !isGenerated(t));
+  if (actual.length || schedule.kind !== 'learn') return { entries: actual, planned: false };
+  return { entries: recent, planned: true };
+}
+
+function paydays(entries, from, through) {
+  const totals = new Map();
+  for (const t of entries) {
+    if (t.date < from || t.date > through) continue;
+    const k = startOfDay(t.date).getTime();
+    totals.set(k, (totals.get(k) || 0) + t.amount);
+  }
+  return [...totals].map(([k, amount]) => ({ day: new Date(k), amount })).sort((a, b) => a.day - b.day);
+}
+
+function learnCadence(days) {
+  const recent = days.slice(-7);
+  const gaps = [];
+  for (let i = 1; i < recent.length; i++) { const g = dayDiff(recent[i - 1].day, recent[i].day); if (g >= 4) gaps.push(g); }
+  if (!gaps.length) return 14;
+  const median = [...gaps].sort((a, b) => a - b)[Math.floor(gaps.length / 2)];
+  if (median <= 10) return 7;
+  if (median <= 17) return gaps.every((g) => g === 14) || (median === 14 && gaps.filter((g) => g === 14).length * 2 > gaps.length) ? 14 : 15;
+  return 30;
+}
+
+const cycleLength = (c) => (c === 7 ? 7 : c === 14 ? 14 : c === 15 ? 365.25 / 24 : 365.25 / 12);
+
+function step(day, cadence, schedule) {
+  const dom = day.getDate();
+  const lastDay = daysInMonth(day);
+  const on = (wanted, ahead) => {
+    const m = addMonths(monthStart(day), ahead);
+    return new Date(m.getFullYear(), m.getMonth(), Math.min(wanted, daysInMonth(m)));
+  };
+  if (schedule.kind === 'twiceMonthly') {
+    if (dom < 15) return on(15, 0);
+    if (dom < lastDay) return on(31, 0);
+    return on(15, 1);
+  }
+  if (schedule.kind === 'monthly') return dom < Math.min(schedule.day, lastDay) ? on(schedule.day, 0) : on(schedule.day, 1);
+  if (cadence === 7 || cadence === 14) return addDays(day, cadence);
+  if (cadence === 15) return dom <= 15 ? addDays(day, Math.min(dom + 15, lastDay) - dom) : on(Math.max(dom - 15, 1), 1);
+  return addMonths(day, 1);
+}
+
+function nextPayday(last, today, cadence, schedule) {
+  if (schedule.kind === 'weekly' || schedule.kind === 'biweekly') {
+    let offset = schedule.weekday - (last.day.getDay() + 1);
+    if (offset > 3) offset -= 7; else if (offset < -3) offset += 7;
+    const anchor = addDays(last.day, offset);
+    let d = addDays(anchor, schedule.cadence);
+    while (d < today) d = addDays(d, schedule.cadence);
+    return d;
+  }
+  let d = step(last.day, cadence, schedule);
+  while (d < today) d = step(d, cadence, schedule);
+  return d;
+}
+
+function expectedAmount(day, cadence, days, projected) {
+  if (cadence !== 7) return days.length ? days[days.length - 1].amount : null;
+  const back = addDays(day, -14);
+  const actual = [...days].reverse().find((p) => Math.abs(p.day - back) <= DAY * 1.5);
+  if (actual) return actual.amount;
+  return projected.get(back.getTime()) ?? null;
+}
+
+export function pace(data, now = new Date()) {
+  const schedule = parseSchedule(data.settings?.paySchedule);
+  const today = startOfDay(now);
+  const { entries, planned } = payEntries(data.transactions, schedule, now);
+  const days = paydays(entries, new Date(0), now);
+  if (!days.length) return null;
+  const last = days[days.length - 1], first = days[0];
+  const cadence = schedule.cadence ?? learnCadence(days);
+  const length = cycleLength(cadence);
+  if (dayDiff(last.day, today) > 2 * length + 7) return null;
+
+  let perDay, counted;
+  const paidToday = sameDay(last.day, today);
+  const windowStart = addDays(today, paidToday ? -27 : -28);
+  const windowEnd = addDays(today, paidToday ? 1 : 0);
+  if ((cadence === 7 || cadence === 14) && first.day <= windowStart) {
+    const inWindow = days.filter((p) => p.day >= windowStart && p.day < windowEnd);
+    perDay = inWindow.reduce((s, p) => s + p.amount, 0) / 28;
+    counted = inWindow.length;
+  } else {
+    const recent = days.slice(-(cadence <= 14 ? 4 : 3));
+    perDay = recent.reduce((s, p) => s + p.amount, 0) / (recent.length * length);
+    counted = recent.length;
+  }
+  const next = nextPayday(last, today, cadence, schedule);
+  const nextAmount = expectedAmount(next, cadence, days, new Map()) ?? last.amount;
+  const usual = cadence === 7 ? 4 : cadence === 14 || cadence === 15 ? 2 : 1;
+  const cadenceName = cadence === 7 ? 'every week' : cadence === 14 ? 'every two weeks' : cadence === 15 ? 'twice a month' : 'every month';
+  return { perDay, cadence, counted, last, next, nextAmount, isEarly: days.length < 2, planned, schedule, usual, cadenceName,
+    history: days, scheduleName: schedule.kind !== 'learn' ? schedule.label : `${cadenceName[0].toUpperCase()}${cadenceName.slice(1)} (learned)` };
+}
+
+export function projectedPaydays(p, until) {
+  const projected = new Map();
+  const out = [];
+  let d = p.next;
+  for (let i = 0; d < until && i < 80; i++) {
+    const amount = expectedAmount(d, p.cadence, p.history, projected) ?? p.last.amount;
+    projected.set(d.getTime(), amount);
+    out.push({ day: d, amount });
+    d = step(d, p.cadence, p.schedule);
+  }
+  return out;
+}
+
+export function monthOutlook(data, p, month, now = new Date()) {
+  const from = monthStart(month), to = monthEnd(month);
+  const { entries } = payEntries(data.transactions, p.schedule, now);
+  const received = paydays(entries, from, new Date(Math.min(now, to)));
+  const upcoming = to > now ? projectedPaydays(p, to).filter((x) => x.day >= from) : [];
+  const receivedTotal = received.reduce((s, x) => s + x.amount, 0);
+  const expected = receivedTotal + upcoming.reduce((s, x) => s + x.amount, 0);
+  return { received: receivedTotal, receivedCount: received.length, receivedDays: received, upcoming, expected,
+    paydayCount: received.length + upcoming.length, extra: received.length + upcoming.length > p.usual };
+}
+
+export function nextExtraPaydayMonth(p, now = new Date()) {
+  if (p.cadence !== 7 && p.cadence !== 14) return null;
+  const start = monthStart(now);
+  const future = projectedPaydays(p, addMonths(start, 13));
+  for (let k = 1; k <= 12; k++) {
+    const m = addMonths(start, k);
+    const inM = future.filter((x) => inMonth(x.day, m));
+    if (inM.length > p.usual) return { month: m, count: inM.length, total: inM.reduce((s, x) => s + x.amount, 0) };
+  }
+  return null;
+}
+
+// ---------- daily limit ----------
+const roundLimit = (raw) => (raw >= 10 ? Math.floor(raw) : Math.floor(raw * 100) / 100);
+
+export function limitMode(settings) {
+  if (settings?.dailyLimit > 0) return 'custom';
+  return settings?.dailyLimitMode === 'paychecks' ? 'paychecks' : 'budget';
+}
+
+export function dailyLimit(data, month = new Date(), now = new Date()) {
+  const settings = data.settings;
+  const days = daysInMonth(month);
+  const mode = limitMode(settings);
+  if (mode === 'custom') return { amount: settings.dailyLimit, mode, days, explanation: 'Set by you. Bills and savings don\'t count against it.' };
+  const bills = billsInMonth(data, month);
+  const budget = settings?.monthlyBudgetGoal ?? 0;
+  if (mode === 'paychecks' || budget <= 0) {
+    const asOf = new Date(Math.min(now, monthEnd(month) - 1));
+    const p = pace(data, asOf);
+    if (p) {
+      const takeHome = p.perDay * days;
+      return { amount: roundLimit(Math.max((takeHome - bills) / days, 0)), mode, days, bills, base: takeHome, pace: p,
+        explanation: `From your paychecks: about ${money0(takeHome)} take-home this month, minus ${money0(bills)} in bills, over ${days} days.` };
+    }
+  }
+  const base = budget > 0 ? budget : monthlyFigures(data, now).income;
+  const amount = base > 0 ? roundLimit(Math.max((base - bills) / days, 0)) : 0;
+  const waiting = mode === 'paychecks' ? 'No paychecks logged yet, so this uses your budget. ' : '';
+  return { amount, mode, days, bills, base, waiting: !!waiting,
+    explanation: `${waiting}Your ${money0(base)} ${budget > 0 ? 'budget' : 'income'}, minus ${money0(bills)} in bills, over ${days} days.` };
+}
+
+export function spentByDay(transactions, month) {
+  const totals = new Map();
+  for (const t of transactions) {
+    if (!countsForDay(t) || !inMonth(t.date, month)) continue;
+    const k = startOfDay(t.date).getTime();
+    totals.set(k, (totals.get(k) || 0) + t.amount);
+  }
+  return totals;
+}
+
+export function dayStatus(spent, limit) {
+  if (!(limit > 0)) return 'none';
+  if (spent > limit + 0.004) return 'over';
+  if (spent >= limit * 0.85) return 'close';
+  return 'under';
+}
+
+// ---------- formatting ----------
+const fmt2 = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
+const fmt0 = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
+export const money = (v) => fmt2.format(v || 0);
+export const money0 = (v) => fmt0.format(Math.round(v || 0));
+export const moneySmart = (v) => (Math.abs(v - Math.round(v)) < 0.005 ? money0(v) : money(v));
