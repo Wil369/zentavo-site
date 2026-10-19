@@ -1,6 +1,6 @@
 // Loads the person's Zentavo data from their private iCloud (CloudKit JS), or sample data.
-import { CONFIG } from './config.js?v=20261019f';
-import { addDays, addMonths, monthStart, startOfDay } from './money.js?v=20261019f';
+import { CONFIG } from './config.js?v=20261019g';
+import { addDays, addMonths, monthStart, startOfDay } from './money.js?v=20261019g';
 
 const CK_SCRIPT = 'https://cdn.apple-cloudkit.com/ck/2/cloudkit.js';
 

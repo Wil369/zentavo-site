@@ -507,9 +507,11 @@ export function moneyPlan(data, now = new Date()) {
   }
   if (!fromPaychecks) { takeHome = monthlyFigures(data, now).income; landed = takeHome; }
   const lines = billLines(data, now).filter((l) => l.counted);
-  const bills = lines.filter((l) => !l.habit);
+  // A repeating transfer to Fidelity or savings is set aside like a bill but counted once, as invested.
+  const moved = (l) => !l.habit && MOVED.has(l.category);
+  const bills = lines.filter((l) => !l.habit && !moved(l));
   const goals = lines.filter((l) => l.habit && l.habitKind !== 'investing');
-  const investGoals = lines.filter((l) => l.habit && l.habitKind === 'investing');
+  const investGoals = lines.filter((l) => (l.habit && l.habitKind === 'investing') || moved(l));
   const thisMonth = data.transactions.filter((t) => inMonth(t.date, now));
   const sum = (arr) => arr.reduce((s, t) => s + t.amount, 0);
   const everydaySpent = sum(thisMonth.filter((t) => countsForDay(t) && t.date <= now));
