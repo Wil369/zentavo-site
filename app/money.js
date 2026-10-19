@@ -169,9 +169,10 @@ export function billLines(data, month) {
       lines.push({ title: debt.name, total: 0, times: 1, kind: 'Debt', counted: false, note: 'No minimum payment set, so it isn\'t counted.' });
     }
   }
-  // Money moved to a separate bills account every payday: its bills are counted above; whatever
-  // goes in beyond them stays in that account, so it isn't in checking to spend either.
-  const move = billsMoveTotal(data, month);
+  // Money moved to a separate bills account every payday, when the leftover stays there: its bills
+  // are counted above; whatever goes in beyond them isn't in checking to spend either. (When the
+  // leftover comes back to checking, only the bills count.)
+  const move = billsMoveTotal(data, month, true);
   if (move.total > 0) {
     const paidFromIt = lines.filter((l) => l.counted && !l.habit && !l.budgetLike && !MOVED.has(l.category)).reduce((s, l) => s + l.total, 0);
     const extra = move.total - paidFromIt;
@@ -192,7 +193,7 @@ export function billsMoves(data) {
     const raw = data.settings && data.settings.moneyMoves;
     if (!raw) return [];
     return JSON.parse(raw).map((m) => ({ amount: Number(m.amount) || 0, frequency: m.frequency || 'Monthly',
-      start: new Date((APPLE_EPOCH + Number(m.start || 0)) * 1000) })).filter((m) => m.amount > 0);
+      start: new Date((APPLE_EPOCH + Number(m.start || 0)) * 1000), keepsExtra: m.keepsExtra === true })).filter((m) => m.amount > 0);
   } catch { return []; }
 }
 
@@ -215,10 +216,10 @@ export function moveDates(move, from, to) {
   return out;
 }
 
-export function billsMoveTotal(data, month) {
+export function billsMoveTotal(data, month, keepingExtra = false) {
   const from = monthStart(month), to = monthEnd(month);
   let total = 0, times = 0;
-  for (const m of billsMoves(data)) {
+  for (const m of billsMoves(data).filter((x) => !keepingExtra || x.keepsExtra)) {
     const count = moveDates(m, from, to).length;
     total += m.amount * count;
     times += count;
