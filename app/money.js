@@ -469,29 +469,40 @@ let RULES = [];
 const habitWords = (s) => (s || '').split(/[,;]/).map((w) => w.trim().toLowerCase()).filter((w) => w.length >= 2);
 
 export function habitRule(g) {
-  return { id: g.id || g.name, category: g.category, words: habitWords(g.matchWords), weekly: g.period !== 'month', target: g.targetAmount, start: g.createdDate || new Date(0) };
+  return { id: g.id || g.name, name: g.name || '', category: g.category, words: habitWords(g.matchWords), weekly: g.period !== 'month', target: g.targetAmount, start: g.createdDate || new Date(0) };
 }
 
 export function useHabits(data) {
   RULES = (data.habitGoals || []).filter((g) => !g.isArchived && g.targetAmount > 0).map(habitRule);
 }
 
-const mentions = (t, words) => {
-  if (!words.length) return false;
+// How clearly an entry points at a goal: 100+ for the goal's name, else the longest of its words.
+function habitScore(t, r) {
   const hay = `${t.title} ${t.notes || ''}`.toLowerCase();
-  return words.some((w) => hay.includes(w));
-};
+  const name = (r.name || '').trim().toLowerCase();
+  let best = name.length >= 3 && hay.includes(name) ? 100 + name.length : 0;
+  for (const w of r.words) if (hay.includes(w)) best = Math.max(best, w.length);
+  return best;
+}
+const isOldest = (r, others) => !others.some((o) => o.start < r.start || (+o.start === +r.start && String(o.id) < String(r.id)));
 
-// Two goals in one category (Mom $50 a week and Dad $50 a week, both Family): an entry goes to the
-// goal whose words it mentions, and one that mentions neither counts once, for the oldest goal.
+// An entry counts for one goal at most. With several goals (Mama $50 a week and Papa $50 a week, both
+// Family) it goes to the goal it points at most clearly ("Pou papam" → Papa); an entry that only
+// matches by category counts for the oldest goal there.
 export function habitMatches(t, r) {
   if (t.type !== 'expense') return false;
-  if (mentions(t, r.words)) return true;
+  const others = RULES.filter((o) => o.id !== r.id);
+  const mine = habitScore(t, r);
+  if (mine > 0) {
+    const rivals = others.filter((o) => habitScore(t, o) >= mine);
+    if (!rivals.length) return true;
+    if (rivals.some((o) => habitScore(t, o) > mine)) return false;
+    return isOldest(r, rivals);
+  }
   if (!r.category || r.category === 'Other' || t.category !== r.category) return false;
-  const siblings = RULES.filter((o) => o.id !== r.id && o.category === r.category);
-  if (!siblings.length) return true;
-  if (siblings.some((o) => mentions(t, o.words))) return false;
-  return !siblings.some((o) => o.start < r.start || (+o.start === +r.start && String(o.id) < String(r.id)));
+  if (others.some((o) => habitScore(t, o) > 0)) return false;
+  const same = others.filter((o) => o.category === r.category);
+  return !same.length || isOldest(r, same);
 }
 
 export const isPlanned = (t) => RULES.some((r) => habitMatches(t, r));
