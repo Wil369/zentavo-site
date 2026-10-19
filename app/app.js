@@ -1,6 +1,6 @@
-import { CONFIG } from './config.js?v=20261019b';
-import { cloudConfigured, connect, describeError, fetchAll, mapRecords, sampleData } from './data.js?v=20261019b';
-import * as M from './money.js?v=20261019b';
+import { CONFIG } from './config.js?v=20261019c';
+import { cloudConfigured, connect, describeError, fetchAll, mapRecords, sampleData } from './data.js?v=20261019c';
+import * as M from './money.js?v=20261019c';
 
 const root = document.getElementById('root');
 const tipEl = document.getElementById('tip');
@@ -261,7 +261,12 @@ const both = (sign, v) => `<span class="full">${sign}${M.money0(v)}</span><span 
 
 function upcomingStrip(d, p, today) {
   const end = M.addDays(today, 14);
-  const events = M.upcomingEvents(d, today, end).filter((e) => !e.isIncome);
+  // A spending budget entered as a repeat (Transportation $400) isn't a bill: its money is
+  // counted day by day, so it's shown faded and left out of the bill total.
+  const events = M.upcomingEvents(d, today, end).filter((e) => !e.isIncome)
+    .map((e) => ({ ...e, budget: !!e.transaction && M.isBudgetLike(e.transaction, d.transactions) }))
+    .sort((a, b) => a.budget - b.budget);
+  const bills = events.filter((e) => !e.budget);
   const pays = p ? M.projectedPaydays(p, end) : [];
   const cells = [];
   for (let i = 0; i < 14; i++) {
@@ -270,16 +275,16 @@ function upcomingStrip(d, p, today) {
     const pay = pays.find((x) => M.sameDay(x.day, day));
     const tags = [
       pay ? `<div class="tag pay" data-tip="<b>Payday</b><br>about ${M.money(pay.amount)}">${both('+', pay.amount)}</div>` : '',
-      ...dayEvents.slice(0, 2).map((e) => `<div class="tag" data-tip="<b>${esc(e.title)}</b><br>${M.money(e.amount)} · ${esc(e.detail)}">${both('', e.amount)}</div>`),
+      ...dayEvents.slice(0, 2).map((e) => `<div class="tag ${e.budget ? 'budget' : ''}" data-tip="<b>${esc(e.title)}</b><br>${M.money(e.amount)} · ${e.budget ? 'a spending budget, counted day by day' : esc(e.detail)}">${both('', e.amount)}</div>`),
       dayEvents.length > 2 ? `<div class="tag" data-tip="${esc(dayEvents.slice(2).map((e) => `${e.title} ${M.money(e.amount)}`).join('<br>'))}">+${dayEvents.length - 2} more</div>` : '',
     ].join('');
     cells.push(`<div class="strip-day ${i === 0 ? 'today' : ''}">
       <div class="strip-dow">${i === 0 ? 'Today' : day.toLocaleDateString('en-US', { weekday: 'short' })}</div>
       <div class="strip-date">${day.getDate()}</div>${tags}</div>`);
   }
-  const billTotal = events.reduce((s, e) => s + e.amount, 0);
+  const billTotal = bills.reduce((s, e) => s + e.amount, 0);
   return `<div class="strip">${cells.join('')}</div>
-    <p class="small muted" style="margin-top:10px">${events.length ? `${events.length} bill${events.length === 1 ? '' : 's'} for ${M.money(billTotal)}` : 'No bills'}${pays.length ? ` · ${pays.length} payday${pays.length === 1 ? '' : 's'} for about ${M.money0(pays.reduce((s, x) => s + x.amount, 0))}` : ''}</p>`;
+    <p class="small muted" style="margin-top:10px">${bills.length ? `${bills.length} bill${bills.length === 1 ? '' : 's'} for ${M.money(billTotal)}` : 'No bills'}${pays.length ? ` · ${pays.length} payday${pays.length === 1 ? '' : 's'} for about ${M.money0(pays.reduce((s, x) => s + x.amount, 0))}` : ''}</p>`;
 }
 
 function drawCalendar(host, d, limitInfo) {
@@ -360,7 +365,7 @@ function cashFlow(d, now, p, outlook, fig) {
     catRows = [...catRows.slice(0, 4), ['Other', rest]];
   }
   const saved = fig.saved;
-  const outs = [['Bills', bills, 'Bills'], ...catRows.map(([c, v]) => [M.shortName(c), v, c]), ...(saved > 0 ? [['Savings', saved, 'Savings']] : [])];
+  const outs = [[(d.habitGoals || []).length ? 'Bills & goals' : 'Bills', bills, 'Bills'], ...catRows.map(([c, v]) => [M.shortName(c), v, c]), ...(saved > 0 ? [['Savings', saved, 'Savings']] : [])];
   const spent = outs.reduce((s, o) => s + o[1], 0);
   const left = income - spent;
   if (left > 0) outs.push(['Not spent yet', left, 'left']);
@@ -476,7 +481,7 @@ function drawTxTable(host, d) {
       </tr></thead>
       <tbody>${list.slice(0, 600).map((t) => {
         const s = M.share(t);
-        const details = [M.isTemplate(t) ? `<span class="pill">Repeats ${esc((t.recurringFrequency || '').toLowerCase())}</span>` : M.isGenerated(t) ? '<span class="pill">Repeating</span>' : '',
+        const details = [t.date > new Date() ? '<span class="pill amber">Upcoming</span>' : '', M.isTemplate(t) ? `<span class="pill">Repeats ${esc((t.recurringFrequency || '').toLowerCase())}</span>` : M.isGenerated(t) ? '<span class="pill">Repeating</span>' : '',
           s < 0.999 ? `<span class="pill mint">Your ${M.sharePhrase(s)} of ${M.money(t.fullAmount)}</span>` : '',
           t.notes ? `<span class="muted small">${esc(t.notes)}</span>` : ''].filter(Boolean).join(' ');
         return `<tr><td class="num">${fmtDay(t.date, { month: 'short', day: 'numeric', year: 'numeric' })}</td><td class="t">${esc(t.title || t.category)}</td>
@@ -511,7 +516,9 @@ function viewBills(el, d) {
   const total = counted.reduce((s, l) => s + l.total, 0);
   const saved = lines.filter((l) => l.counted && l.fullTotal).reduce((s, l) => s + (l.fullTotal - l.total), 0);
   const today = M.startOfDay(now);
-  const events = M.upcomingEvents(d, today, M.addDays(today, 31)).filter((e) => !e.isIncome);
+  const events = M.upcomingEvents(d, today, M.addDays(today, 31)).filter((e) => !e.isIncome)
+    .map((e) => ({ ...e, budget: !!e.transaction && M.isBudgetLike(e.transaction, d.transactions) }));
+  const due = events.filter((e) => !e.budget);
   const p = M.pace(d, now);
   const pays = p ? M.projectedPaydays(p, M.addDays(today, 31)) : [];
   const timeline = [...events.map((e) => ({ ...e, kind: 'bill' })), ...pays.map((x) => ({ date: x.day, title: 'Payday', amount: x.amount, kind: 'pay' }))].sort((a, b) => a.date - b.date);
@@ -519,7 +526,7 @@ function viewBills(el, d) {
     <section class="grid kpis three">
       <div class="card"><h2>Bills this month</h2><div class="kpi-val">${M.money(total)}</div><div class="kpi-sub">${counted.length} counted in your daily limit</div></div>
       <div class="card"><h2>Covered by others</h2><div class="kpi-val">${M.money(saved)}</div><div class="kpi-sub">the other share of split bills, not counted as yours</div></div>
-      <div class="card"><h2>Next 31 days</h2><div class="kpi-val">${M.money(events.reduce((s, e) => s + e.amount, 0))}</div><div class="kpi-sub">${events.length} bills due</div></div>
+      <div class="card"><h2>Next 31 days</h2><div class="kpi-val">${M.money(due.reduce((s, e) => s + e.amount, 0))}</div><div class="kpi-sub">${due.length} bills due</div></div>
     </section>
     <section class="grid halves">
       <div class="card"><h2>This month's bills</h2>
@@ -533,8 +540,8 @@ function viewBills(el, d) {
       <div class="card"><h2>Coming up</h2>
         <div class="rows">${timeline.map((e) => `<div class="row">
           <span class="ic">${svg(e.kind === 'pay' ? 'coin' : catIcon(e.transaction?.category))}</span>
-          <div class="grow"><div class="t">${esc(e.title)}</div><div class="s">${fmtDay(e.date, { weekday: 'short', month: 'short', day: 'numeric' })}${e.kind === 'bill' ? ` · ${esc(e.detail)}` : ' · expected'}</div></div>
-          <span class="amt ${e.kind === 'pay' ? 'in' : ''}">${e.kind === 'pay' ? '+' : '−'}${M.money(e.amount)}</span></div>`).join('') || '<div class="empty-state">Nothing in the next month</div>'}</div>
+          <div class="grow"><div class="t">${esc(e.title)}</div><div class="s">${fmtDay(e.date, { weekday: 'short', month: 'short', day: 'numeric' })}${e.kind === 'bill' ? ` · ${e.budget ? 'spending budget, counted day by day' : esc(e.detail)}` : ' · expected'}</div></div>
+          <span class="amt ${e.kind === 'pay' ? 'in' : e.budget ? 'muted' : ''}">${e.kind === 'pay' ? '+' : e.budget ? '' : '−'}${M.money(e.amount)}</span></div>`).join('') || '<div class="empty-state">Nothing in the next month</div>'}</div>
       </div>
     </section>`;
 }
@@ -649,7 +656,7 @@ function viewGoals(el, d) {
         : `<div class="empty-state">Goals you keep every week, like sending Mom &amp; Dad $50, giving, or saving $25. Add one on your iPhone: Home → Weekly goals.</div>`}
     </section>
 
-    <section class="grid ${groups.length >= 3 ? 'thirds' : 'halves'}">
+    <section class="grid ${groups.length >= 3 ? 'thirds' : groups.length === 2 ? 'halves' : ''}">
       ${groups.map((grp) => `<div class="card"><h2>${grp.title} <span class="small muted" style="text-transform:none;letter-spacing:0">${grp.caption}</span></h2>
         ${grp.goals.map((g) => savingsRow(g, now)).join('')}</div>`).join('') || '<div class="card"><div class="empty-state">No savings goals yet. Add one on your iPhone, like a vacation or an emergency fund.</div></div>'}
     </section>`;
