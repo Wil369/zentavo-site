@@ -1,6 +1,6 @@
-import { CONFIG } from './config.js?v=20261019c';
-import { cloudConfigured, connect, describeError, fetchAll, mapRecords, sampleData } from './data.js?v=20261019c';
-import * as M from './money.js?v=20261019c';
+import { CONFIG } from './config.js?v=20261019d';
+import { cloudConfigured, connect, describeError, fetchAll, mapRecords, sampleData } from './data.js?v=20261019d';
+import * as M from './money.js?v=20261019d';
 
 const root = document.getElementById('root');
 const tipEl = document.getElementById('tip');
@@ -587,7 +587,7 @@ function viewPaychecks(el, d) {
       <div class="card"><h2>The next 12 months</h2>
         <div class="rows">${year.map((y) => `<div class="kv"><span class="k">${y.m.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</span>
           <span class="v">${y.count} paydays · ${M.money0(y.total)}${y.count > p.usual ? ' <span class="pill mint">Extra payday</span>' : ''}</span></div>`).join('')}</div>
-        ${extra ? `<p class="small muted" style="margin-top:10px">${extra.month.toLocaleDateString('en-US', { month: 'long' })} has ${extra.count} paydays. The extra one isn't needed for regular bills.</p>` : ''}
+        ${extra ? `<p class="small muted" style="margin-top:10px">${extra.month.toLocaleDateString('en-US', { month: 'long' })} has ${extra.count} paydays. It raises that month's daily limit, or it can all go to savings.</p>` : ''}
       </div>
     </section>`;
 }

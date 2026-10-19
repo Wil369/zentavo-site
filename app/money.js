@@ -359,9 +359,14 @@ export function dailyLimit(data, month = new Date(), now = new Date()) {
     const asOf = new Date(Math.min(now, monthEnd(month) - 1));
     const p = pace(data, asOf);
     if (p) {
-      const takeHome = p.perDay * days;
-      return { amount: roundLimit(Math.max((takeHome - bills) / days, 0)), mode, days, bills, base: takeHome, pace: p,
-        explanation: `From your paychecks: about ${money0(takeHome)} take-home this month, minus ${money0(bills)} in bills, over ${days} days.` };
+      // This month's real pay (landed + still to come), like the iPhone: weekly pay brings 4
+      // paychecks most months and 5 in some, so an average month would overstate October.
+      const outlook = monthOutlook(data, p, month, asOf);
+      const paydays = outlook ? outlook.paydayCount : 0;
+      const takeHome = paydays > 0 ? outlook.expected : p.perDay * days;
+      const when = paydays > 0 ? `this month (${paydays} paydays)` : 'in a typical month';
+      return { amount: roundLimit(Math.max((takeHome - bills) / days, 0)), mode, days, bills, base: takeHome, pace: p, paydays,
+        explanation: `From your paychecks: about ${money0(takeHome)} take-home ${when}, minus ${money0(bills)} in bills, over ${days} days.` };
     }
   }
   const base = budget > 0 ? budget : monthlyFigures(data, now).income;
