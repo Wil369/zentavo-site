@@ -2,6 +2,9 @@
 // MoneyFacts.upcomingEvents), so the web shows exactly the numbers the phone does.
 
 export const SAVINGS = 'Savings';
+export const INVESTING = 'Investing';
+/** Money moved, not spent: savings goals and brokerages (Fidelity, Robinhood). */
+export const MOVED = new Set([SAVINGS, INVESTING]);
 export const DEBT = 'Debt Payments';
 const DAY = 86_400_000;
 
@@ -28,7 +31,8 @@ const dayDiff = (a, b) => Math.round((startOfDay(b) - startOfDay(a)) / DAY);
 // ---------- what an entry is ----------
 export const isTemplate = (t) => t.isRecurring && !!t.recurringFrequency && !t.recurringTemplateID;
 export const isGenerated = (t) => !!t.recurringTemplateID;
-export const isSpending = (t) => t.type === 'expense' && t.category !== SAVINGS;
+export const isSpending = (t) => t.type === 'expense' && !MOVED.has(t.category);
+export const isMoved = (t) => t.type === 'expense' && MOVED.has(t.category);
 export const isBill = (t) => isTemplate(t) || isGenerated(t) || t.category === DEBT;
 // Money a weekly goal plans for ("Mom & Dad $50 a week") never counts against the day.
 export const countsForDay = (t) => isSpending(t) && !isBill(t) && !isPlanned(t);
@@ -152,7 +156,7 @@ export function billLines(data, month) {
         line.note = `Covered by your “${g.name}” goal, so it isn't counted twice.`;
       }
     }
-    lines.push({ title: g.name, total: habitSetAside(g, month), times: 1, counted: true, category: g.category, habit: true,
+    lines.push({ title: g.name, total: habitSetAside(g, month), times: 1, counted: true, category: g.category, habit: true, habitKind: g.kind,
       kind: `${HABIT_KIND[g.kind] || 'Weekly'} goal · ${money0(g.targetAmount)} a ${r.weekly ? 'week' : 'month'}` });
   }
   for (const debt of data.debts) {
@@ -177,7 +181,7 @@ export function monthlyFigures(data, now = new Date()) {
   const lastTx = data.transactions.filter((t) => inMonth(t.date, last));
   const sum = (arr) => arr.reduce((s, t) => s + t.amount, 0);
   const expenses = sum(thisTx.filter(isSpending));
-  const saved = sum(thisTx.filter((t) => t.type === 'expense' && t.category === SAVINGS));
+  const saved = sum(thisTx.filter(isMoved));
   const actualIncome = sum(thisTx.filter((t) => t.type === 'income'));
   const previousIncome = sum(lastTx.filter((t) => t.type === 'income'));
   const income = actualIncome > 0 ? actualIncome : previousIncome;
@@ -403,7 +407,7 @@ export const moneySmart = (v) => (Math.abs(v - Math.round(v)) < 0.005 ? money0(v
 // ---------- weekly goals ----------
 // Same rules as the iPhone: an entry counts when it's in the goal's category, or its name or
 // note mentions one of the goal's words (a Zelle memo like "Pou papam" lands in the note).
-export const HABIT_KIND = { family: 'Family support', giving: 'Giving', saving: 'Save regularly', custom: 'Weekly' };
+export const HABIT_KIND = { family: 'Family support', giving: 'Giving', saving: 'Save regularly', investing: 'Invest', custom: 'Weekly' };
 let RULES = [];
 const habitWords = (s) => (s || '').split(/[,;]/).map((w) => w.trim().toLowerCase()).filter((w) => w.length >= 2);
 
@@ -488,4 +492,49 @@ export function goalPerWeek(g, now = new Date()) {
   const left = Math.max(g.targetAmount - g.currentAmount, 0);
   const weeks = Math.max((g.deadline - now) / (7 * DAY), 1);
   return left / weeks;
+}
+
+// ---------- money plan ----------
+/** Where this month's paychecks go, and what's left to invest (same as the iPhone). */
+export function moneyPlan(data, now = new Date()) {
+  const p = pace(data, now);
+  let takeHome = 0, landed = 0, paydayCount = 0, landedCount = 0, fromPaychecks = false;
+  if (p) {
+    const o = monthOutlook(data, p, now, now);
+    if (o.paydayCount > 0) {
+      takeHome = o.expected; landed = o.received; paydayCount = o.paydayCount; landedCount = o.receivedCount; fromPaychecks = true;
+    }
+  }
+  if (!fromPaychecks) { takeHome = monthlyFigures(data, now).income; landed = takeHome; }
+  const lines = billLines(data, now).filter((l) => l.counted);
+  const bills = lines.filter((l) => !l.habit);
+  const goals = lines.filter((l) => l.habit && l.habitKind !== 'investing');
+  const investGoals = lines.filter((l) => l.habit && l.habitKind === 'investing');
+  const thisMonth = data.transactions.filter((t) => inMonth(t.date, now));
+  const sum = (arr) => arr.reduce((s, t) => s + t.amount, 0);
+  const everydaySpent = sum(thisMonth.filter((t) => countsForDay(t) && t.date <= now));
+  const invested = sum(thisMonth.filter((t) => t.type === 'expense' && t.category === INVESTING));
+  const saved = sum(thisMonth.filter((t) => t.type === 'expense' && t.category === SAVINGS));
+  const today = startOfDay(now);
+  const everyday = data.transactions.filter((t) => countsForDay(t) && t.date <= now);
+  let perDay = 0, paceDays = 0;
+  if (everyday.length) {
+    const first = startOfDay(everyday.reduce((m, t) => (t.date < m ? t.date : m), now));
+    const windowStart = first > addDays(today, -29) ? first : addDays(today, -29);
+    paceDays = dayDiff(windowStart, today) + 1;
+    perDay = sum(everyday.filter((t) => t.date >= windowStart)) / Math.max(paceDays, 1);
+  }
+  const daysLeft = daysInMonth(now) - now.getDate();
+  const total = (arr) => arr.reduce((s, l) => s + l.total, 0);
+  const billsTotal = total(bills), goalsTotal = total(goals), investTarget = total(investGoals);
+  const free = takeHome - billsTotal - goalsTotal;
+  const projectedEveryday = everydaySpent + perDay * daysLeft;
+  const canInvest = Math.max(free - projectedEveryday - saved, 0);
+  return {
+    takeHome, landed, paydayCount, landedCount, fromPaychecks, bills: bills.sort((a, b) => b.total - a.total), goals, investGoals,
+    everydaySpent, perDay, paceDays, daysLeft, invested, saved, billsTotal, goalsTotal, investTarget, free, projectedEveryday,
+    canInvest, leftToInvest: Math.max(canInvest - invested, 0), leftThisMonth: free - everydaySpent - invested - saved,
+    used: billsTotal + goalsTotal + everydaySpent + invested + saved,
+    suggestedInvest: Math.floor(canInvest / 50) * 50,
+  };
 }

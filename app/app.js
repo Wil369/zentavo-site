@@ -1,6 +1,6 @@
-import { CONFIG } from './config.js?v=20261019d';
-import { cloudConfigured, connect, describeError, fetchAll, mapRecords, sampleData } from './data.js?v=20261019d';
-import * as M from './money.js?v=20261019d';
+import { CONFIG } from './config.js?v=20261019e';
+import { cloudConfigured, connect, describeError, fetchAll, mapRecords, sampleData } from './data.js?v=20261019e';
+import * as M from './money.js?v=20261019e';
 
 const root = document.getElementById('root');
 const tipEl = document.getElementById('tip');
@@ -35,6 +35,8 @@ const ICON = {
   star: '<path d="M12 4l2.4 5 5.6.6-4.2 3.8 1.2 5.6L12 16.3 7 19l1.2-5.6L4 9.6 9.6 9z"/>',
   heart: '<path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z"/>',
   networth: '<path d="M3 17l6-6 4 4 8-8"/><path d="M15 7h6v6"/>',
+  card: '<rect x="3" y="6" width="18" height="13" rx="2.5"/><path d="M3 10.5h18M7 15h4"/>',
+  plan: '<path d="M12 3v9h9"/><path d="M20.5 15.5A9 9 0 1 1 8.5 3.7"/>',
   family: '<circle cx="8" cy="7" r="2.6"/><circle cx="16" cy="7" r="2.6"/><path d="M3.5 20v-4.5A3.5 3.5 0 0 1 7 12h2a3.5 3.5 0 0 1 3.5 3.5V20M11.5 20v-4.5A3.5 3.5 0 0 1 15 12h2a3.5 3.5 0 0 1 3.5 3.5V20"/>',
   flame: '<path d="M12 21c-3.9 0-6.5-2.6-6.5-6.2 0-3.3 2.4-5.4 3.9-7.6.4 1.6 1.2 2.7 2.4 3.3C12 7.4 13.4 5 15.6 3c.2 3 3 5.4 3 10.1 0 4.6-2.8 7.9-6.6 7.9z"/>',
   coin: '<circle cx="12" cy="12" r="8"/><path d="M12 8v8M9.5 10h4a1.5 1.5 0 0 1 0 3h-3a1.5 1.5 0 0 0 0 3h4"/>',
@@ -42,10 +44,10 @@ const ICON = {
 };
 const svg = (name, cls = '') => `<svg viewBox="0 0 24 24" class="${cls}" aria-hidden="true">${ICON[name] || ICON.dot}</svg>`;
 const catIcon = (c) => ({ Housing: 'home', 'Food & Groceries': 'cart', Transportation: 'car', Subscriptions: 'repeat', Shopping: 'bag',
-  Entertainment: 'star', 'Personal Care': 'heart', Healthcare: 'heart', Salary: 'coin', Savings: 'coin', Family: 'family', Giving: 'heart' }[c] || 'dot');
+  Entertainment: 'star', 'Personal Care': 'heart', Healthcare: 'heart', Salary: 'coin', Savings: 'coin', Investing: 'networth', Family: 'family', Giving: 'heart', 'Debt Payments': 'card' }[c] || 'dot');
 
 // Fixed category → series slot, so a category keeps its color everywhere (never by rank).
-const CAT_SLOT = { Bills: 1, 'Food & Groceries': 2, Transportation: 3, Shopping: 4, Entertainment: 5, 'Personal Care': 6, Healthcare: 6, Other: 8, Savings: 7, Education: 8, Subscriptions: 1, Housing: 1, Family: 7, Giving: 7 };
+const CAT_SLOT = { Bills: 1, 'Food & Groceries': 2, Transportation: 3, Shopping: 4, Entertainment: 5, 'Personal Care': 6, Healthcare: 6, Other: 8, Savings: 7, Education: 8, Subscriptions: 1, Housing: 1, Family: 7, Giving: 7, Investing: 3 };
 const slotColor = (c) => `var(--s${CAT_SLOT[c] || 8})`;
 
 // ---------- tooltip ----------
@@ -133,7 +135,7 @@ function brandMark() {
 
 // ---------- shell ----------
 const VIEWS = [
-  ['overview', 'Overview'], ['transactions', 'Transactions'], ['bills', 'Bills & splits'], ['paychecks', 'Paychecks'], ['goals', 'Goals'], ['networth', 'Net worth'],
+  ['overview', 'Overview'], ['plan', 'Money plan'], ['transactions', 'Transactions'], ['bills', 'Bills & splits'], ['paychecks', 'Paychecks'], ['goals', 'Goals'], ['networth', 'Net worth'],
 ];
 
 function render() {
@@ -174,7 +176,7 @@ function render() {
   }));
   document.getElementById('refresh')?.addEventListener('click', () => loadFromCloud().catch((e) => alertBanner(e.message)));
   const view = document.getElementById('view');
-  ({ overview: viewOverview, transactions: viewTransactions, bills: viewBills, paychecks: viewPaychecks, goals: viewGoals, networth: viewNetWorth })[state.view](view, d);
+  ({ overview: viewOverview, transactions: viewTransactions, bills: viewBills, paychecks: viewPaychecks, goals: viewGoals, networth: viewNetWorth, plan: viewPlan })[state.view](view, d);
 }
 
 function alertBanner(message) {
@@ -198,12 +200,12 @@ function viewOverview(el, d) {
 
   el.innerHTML = `
     <section class="grid kpis">
-      <div class="card">
+      ${M.limitMode(d.settings) === 'paychecks' ? planKpi(d, now, monthName) : `<div class="card">
         <h2>Left to spend in ${monthName}</h2>
         <div class="hero-num ${fig.leftToSpend < 0 ? 'over' : ''}">${M.money(fig.leftToSpend)}</div>
         ${fig.budget > 0 ? `<div class="bar ${fig.leftToSpend < 0 ? 'rose' : pct(fig.expenses, fig.budget) > 85 ? 'amber' : ''}"><span style="width:${pct(fig.expenses, fig.budget)}%"></span></div>
         <div class="kpi-sub"><b>${M.money0(fig.expenses)}</b> of ${M.money(fig.budget)} budget · about <b>${M.money(Math.max(perDay, 0))}</b> a day for the rest of ${monthName}</div>` : `<div class="kpi-sub">No monthly budget set</div>`}
-      </div>
+      </div>`}
       <div class="card">
         <h2>Today</h2>
         <div class="kpi-val ${status === 'over' ? 'status-bad' : status === 'close' ? 'status-warn' : ''}">${M.money(spentToday)}</div>
@@ -588,6 +590,63 @@ function viewPaychecks(el, d) {
         <div class="rows">${year.map((y) => `<div class="kv"><span class="k">${y.m.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</span>
           <span class="v">${y.count} paydays · ${M.money0(y.total)}${y.count > p.usual ? ' <span class="pill mint">Extra payday</span>' : ''}</span></div>`).join('')}</div>
         ${extra ? `<p class="small muted" style="margin-top:10px">${extra.month.toLocaleDateString('en-US', { month: 'long' })} has ${extra.count} paydays. It raises that month's daily limit, or it can all go to savings.</p>` : ''}
+      </div>
+    </section>`;
+}
+
+// ---------- money plan ----------
+function planKpi(d, now, monthName) {
+  const pl = M.moneyPlan(d, now);
+  return `<div class="card clickable" data-goto="plan">
+    <h2>Left in ${monthName}</h2>
+    <div class="hero-num ${pl.leftThisMonth < 0 ? 'over' : ''}">${M.money(pl.leftThisMonth)}</div>
+    <div class="bar ${pl.leftThisMonth < 0 ? 'rose' : pct(pl.used, pl.takeHome) > 85 ? 'amber' : ''}"><span style="width:${pct(pl.used, pl.takeHome)}%"></span></div>
+    <div class="kpi-sub"><b>${M.money0(pl.used)}</b> of ${M.money0(pl.takeHome)} take-home · ${pl.canInvest > 0 ? `about <b class="status-good">${M.money0(pl.leftToInvest)}</b> left to invest at your pace` : 'your spending pace uses all of this month\'s pay'}</div>
+  </div>`;
+}
+
+function viewPlan(el, d) {
+  const now = new Date();
+  const pl = M.moneyPlan(d, now);
+  const monthName = now.toLocaleDateString('en-US', { month: 'long' });
+  const end = `${monthName} ${M.daysInMonth(now)}`;
+  const coming = pl.paydayCount - pl.landedCount;
+  const row = (icon, title, detail, amount, sign, cls = '') => `<div class="row">
+      <span class="ic">${svg(icon)}</span>
+      <div class="grow"><div class="t">${esc(title)}</div><div class="s">${detail}</div></div>
+      <span class="amt ${cls}">${sign}${M.money(amount)}</span></div>`;
+  const sub = (title, amount, hi) => `<div class="row subtotal ${hi ? 'hi' : ''}"><div class="grow"><div class="t">${title}</div></div><span class="amt">${M.money(amount)}</span></div>`;
+  const investGoal = (d.habitGoals || []).find((g) => g.kind === 'investing');
+  const limitNow = M.dailyLimit(d, now, now).amount;
+  const limitWith = Math.max(Math.floor((pl.free - Math.max(pl.suggestedInvest, 50)) / M.daysInMonth(now)), 0);
+  el.innerHTML = `
+    <section class="grid kpis">
+      <div class="card"><h2>Left to invest in ${monthName}</h2><div class="hero-num ${pl.leftToInvest > 0 ? '' : 'over'}">${M.money0(pl.leftToInvest)}</div>
+        <div class="kpi-sub">${pl.canInvest <= 0 ? 'At your everyday pace, bills and spending use all of this month\'s pay.'
+          : pl.invested > 0 ? `You've invested <b>${M.money0(pl.invested)}</b> so far. About <b>${M.money0(pl.leftToInvest)}</b> more is free by ${end}.`
+          : `After rent, bills, goals and everyday spending at your pace${pl.paceDays ? ` (about <b>${M.money0(pl.perDay)}</b> a day)` : ''}, free by ${end}.`}</div></div>
+      <div class="card"><h2>Take-home</h2><div class="kpi-val">${M.money0(pl.takeHome)}</div><div class="kpi-sub">${pl.fromPaychecks ? `${pl.paydayCount} paychecks · ${pl.landedCount} in${coming > 0 ? `, ${coming} coming` : ''}` : 'income this month'}</div></div>
+      <div class="card"><h2>Bills & goals</h2><div class="kpi-val">${M.money0(pl.billsTotal + pl.goalsTotal)}</div><div class="kpi-sub">your share only · ${pl.bills.length + pl.goals.length} items</div></div>
+      <div class="card"><h2>Invested this month</h2><div class="kpi-val ${pl.invested > 0 ? 'status-good' : ''}">${M.money0(pl.invested)}</div><div class="kpi-sub">${investGoal ? `goal ${M.money0(investGoal.targetAmount)} a ${investGoal.period === 'month' ? 'month' : 'week'}` : 'Fidelity, Robinhood…'}</div></div>
+    </section>
+    <section class="grid two">
+      <div class="card"><h2>Where your paychecks go</h2>
+        <div class="rows">
+          ${row('coin', 'Take-home', pl.fromPaychecks ? `${pl.paydayCount} paychecks · ${pl.landedCount} in${coming > 0 ? `, ${coming} coming` : ''}` : 'This month\'s income', pl.takeHome, '+', 'in')}
+          ${pl.bills.map((l) => row(catIcon(l.category), l.title, l.fullTotal ? `Your ${M.sharePhrase(l.share)} of ${M.money(l.fullTotal)}` : l.kind === 'Debt payment' ? 'Debt minimum' : l.times > 1 ? `${l.times} times this month` : 'Monthly', l.total, '−')).join('')}
+          ${pl.goals.map((l) => row('family', l.title, esc(l.kind), l.total, '−')).join('')}
+          ${sub('Free after bills & goals', pl.free)}
+          ${row('cart', 'Everyday spending', pl.daysLeft && pl.paceDays ? `${M.money0(pl.everydaySpent)} so far + about ${M.money0(pl.perDay)} a day for ${pl.daysLeft} more days` : `${M.money0(pl.everydaySpent)} this month`, pl.projectedEveryday, '−')}
+          ${pl.saved > 0 ? row('coin', 'Moved to savings goals', 'This month', pl.saved, '−') : ''}
+          ${pl.invested > 0 ? row('networth', 'Already invested', 'This month', pl.invested, '−') : ''}
+          ${sub('Left to invest', pl.leftToInvest, true)}
+        </div>
+      </div>
+      <div class="card"><h2>Pay yourself first</h2>
+        ${investGoal ? `<p class="kpi-sub">Your investing goal (${M.money0(investGoal.targetAmount)} a ${investGoal.period === 'month' ? 'month' : 'week'}) is taken out before the daily limit, so the limit leaves room for it.</p>`
+          : `<p class="kpi-sub" style="margin-bottom:12px">Your daily limit (<b>${M.money0(limitNow)}</b>) gives everything after bills to everyday spending. Set an investing goal on your iPhone (Home → Money plan) and Zentavo takes it out first.</p>
+            ${pl.canInvest >= 50 ? `<div class="kv"><span class="k">Invest ${M.money0(Math.max(pl.suggestedInvest, 50))} a month</span><span class="v status-good">daily limit about ${M.money0(limitWith)}</span></div>` : ''}`}
+        <p class="small muted" style="margin-top:14px">Take-home is what lands in your account, after taxes, 401(k) and insurance. Paychecks still to come are estimated from your recent ones.${pl.paceDays && pl.paceDays < 14 ? ` Your everyday pace is based on ${pl.paceDays} days of spending, so it firms up as you log more.` : ''}</p>
       </div>
     </section>`;
 }
