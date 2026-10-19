@@ -591,6 +591,25 @@ export function goalPerWeek(g, now = new Date()) {
 
 // ---------- money plan ----------
 /** Where this month's paychecks go, and what's left to invest (same as the iPhone). */
+// The spending-plan split of take-home pay (fixed costs 50–60%, investments about 10%, savings 5–10%,
+// guilt-free 25–30%). Everyday needs are planned as fixed costs; meals out are wants.
+export const BUCKETS = [
+  { key: 'fixed', label: 'Fixed costs', low: 0.5, high: 0.6, target: '50–60%' },
+  { key: 'investments', label: 'Investments', low: 0.1, high: 1, target: 'about 10%' },
+  { key: 'savings', label: 'Savings', low: 0.05, high: 0.1, target: '5–10%' },
+  { key: 'guiltFree', label: 'Guilt-free spending', low: 0.25, high: 0.3, target: '25–30%' },
+];
+const ESSENTIAL_CATS = ['Transportation', 'Food & Groceries', 'Healthcare', 'Education'];
+const GUILT_FREE_CATS = new Set(['Shopping', 'Entertainment', 'Personal Care', 'Other']);
+const DINING_WORDS = ['uber eats', 'ubereats', 'doordash', 'grubhub', 'postmates', 'seamless', 'caviar', 'instacart meal',
+  'restaurant', 'cafe', 'café', 'coffee', 'starbucks', 'dunkin', 'mcdonald', 'chipotle', 'pizza', 'taco', 'burger',
+  'wendy', 'subway', 'panera', 'chick-fil', 'popeyes', 'kfc', 'domino', 'sushi', 'grill', 'diner', 'bistro', 'bakery', 'bar & '];
+export function isDiningOut(t) {
+  if (t.category !== 'Food & Groceries') return false;
+  const text = `${t.title} ${t.notes || ''}`.toLowerCase();
+  return DINING_WORDS.some((w) => text.includes(w));
+}
+
 export function moneyPlan(data, now = new Date()) {
   const p = pace(data, now);
   let takeHome = 0, landed = 0, paydayCount = 0, landedCount = 0, fromPaychecks = false;
@@ -630,6 +649,18 @@ export function moneyPlan(data, now = new Date()) {
   for (const l of billLines(data, now)) if (l.budgetLike && EVERYDAY_CATS.has(l.category)) budgetsBy.set(l.category, Math.max(budgetsBy.get(l.category) || 0, l.total));
   const everydayBudgets = [...budgetsBy].map(([category, amount]) => ({ category, amount })).sort((a, b) => b.amount - a.amount);
   const everydayBudgetTotal = everydayBudgets.reduce((s, b) => s + b.amount, 0);
+  // Needs, category by category: the budget, or what's spent plus the same pace for the days left.
+  const windowStart = everyday.length
+    ? (() => { const first = startOfDay(everyday.reduce((m, t) => (t.date < m ? t.date : m), now)); return first > addDays(today, -29) ? first : addDays(today, -29); })()
+    : today;
+  let essentialEveryday = 0;
+  for (const c of ESSENTIAL_CATS) {
+    const need = (t) => t.category === c && !isDiningOut(t);
+    const soFar = sum(thisMonth.filter((t) => countsForDay(t) && t.date <= now && need(t)));
+    const pace = paceDays ? sum(everyday.filter((t) => t.date >= windowStart && need(t))) / paceDays : 0;
+    essentialEveryday += Math.max(budgetsBy.get(c) || 0, soFar + pace * daysLeft);
+  }
+  const guiltFreeSpent = sum(thisMonth.filter((t) => countsForDay(t) && t.date <= now && (GUILT_FREE_CATS.has(t.category) || isDiningOut(t))));
   const total = (arr) => arr.reduce((s, l) => s + l.total, 0);
   const billsTotal = total(bills), goalsTotal = total(goals), investTarget = total(investGoals);
   const free = takeHome - billsTotal - goalsTotal;
@@ -645,5 +676,12 @@ export function moneyPlan(data, now = new Date()) {
     canInvest, leftToInvest: Math.max(canInvest - invested, 0), leftThisMonth: free - everydaySpent - invested - savedInMonth,
     used: billsTotal + goalsTotal + everydaySpent + invested + savedInMonth,
     suggestedInvest: Math.floor((canInvest * 0.85) / 50) * 50,
+    essentialEveryday, guiltFreeSpent,
+    split: (() => {
+      const fixed = billsTotal + goalsTotal + essentialEveryday;
+      const investments = Math.max(invested, investTarget);
+      const amounts = { fixed, investments, savings: savedInMonth, guiltFree: takeHome - fixed - investments - savedInMonth };
+      return BUCKETS.map((b) => ({ ...b, amount: amounts[b.key], share: takeHome > 0 ? amounts[b.key] / takeHome : 0 }));
+    })(),
   };
 }

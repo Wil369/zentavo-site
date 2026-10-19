@@ -1,6 +1,6 @@
-import { CONFIG } from './config.js?v=20261019l';
-import { cloudConfigured, connect, describeError, fetchAll, mapRecords, sampleData } from './data.js?v=20261019l';
-import * as M from './money.js?v=20261019l';
+import { CONFIG } from './config.js?v=20261019m';
+import { cloudConfigured, connect, describeError, fetchAll, mapRecords, sampleData } from './data.js?v=20261019m';
+import * as M from './money.js?v=20261019m';
 
 const root = document.getElementById('root');
 const tipEl = document.getElementById('tip');
@@ -629,6 +629,7 @@ function viewPlan(el, d) {
       <div class="card"><h2>Bills & goals</h2><div class="kpi-val">${M.money0(pl.billsTotal + pl.goalsTotal)}</div><div class="kpi-sub">your share only · ${pl.bills.length + pl.goals.length} items</div></div>
       <div class="card"><h2>Invested this month</h2><div class="kpi-val ${pl.invested > 0 ? 'status-good' : ''}">${M.money0(pl.invested)}</div><div class="kpi-sub">${investGoal ? `goal ${M.money0(investGoal.targetAmount)} a ${investGoal.period === 'month' ? 'month' : 'week'}` : 'Fidelity, Robinhood…'}</div></div>
     </section>
+    ${planSplit(pl)}
     <section class="grid two">
       <div class="card"><h2>Where your paychecks go</h2>
         <div class="rows">
@@ -649,6 +650,38 @@ function viewPlan(el, d) {
         <p class="small muted" style="margin-top:14px">Take-home is what lands in your account, after taxes, 401(k) and insurance. Paychecks still to come are estimated from your recent ones.${pl.paceDays && pl.paceDays < 14 ? ` Your everyday pace is based on ${pl.paceDays} days of spending, so it firms up as you log more.` : ''}</p>
       </div>
     </section>`;
+}
+
+// The spending-plan split: fixed costs, investments, savings and guilt-free spending as shares of take-home.
+const SPLIT_COLOR = { fixed: 'var(--sky)', investments: 'var(--mint)', savings: 'var(--lav)', guiltFree: 'var(--amber)' };
+function splitStatus(b) {
+  const lo = b.low - 0.005, hi = b.high + 0.005, s = b.share;
+  if (b.key === 'fixed') return s > hi ? ['above the range', 'status-warn'] : s < lo ? ['below the range, so more room for the rest', 'status-good'] : ['in range', 'status-good'];
+  if (b.key === 'investments') return s >= lo ? ['on target', 'status-good'] : ['below target', 'status-warn'];
+  if (b.key === 'savings') return s > hi ? ['above the range', 'status-good'] : s >= lo ? ['in range', 'status-good'] : ['below the range', 'status-warn'];
+  if (s < 0) return ['nothing left for it this month', 'status-bad'];
+  return s < lo ? ['below the range', 'status-warn'] : s > hi ? ['above the range', 'muted'] : ['in range', 'status-good'];
+}
+function planSplit(pl) {
+  if (!(pl.takeHome > 0)) return '';
+  const pos = pl.split.map((b) => Math.max(b.share, 0));
+  const total = pos.reduce((a, b) => a + b, 0);
+  const scale = total > 1 ? 1 / total : 1;
+  const detail = (b) => {
+    if (b.key === 'fixed') return [`Bills ${M.money0(pl.billsTotal)}`, ...(pl.goals.length ? [`${pl.goals.map((g) => esc(g.title)).join(' &amp; ')} ${M.money0(pl.goalsTotal)}`] : []), `Everyday needs ${M.money0(pl.essentialEveryday)}`].join(' · ');
+    if (b.key === 'investments') return pl.invested > 0 ? `Invested so far ${M.money0(pl.invested)}${pl.investTarget > pl.invested ? ` · goal ${M.money0(pl.investTarget)}` : ''}` : pl.investTarget > 0 ? `Investing goal ${M.money0(pl.investTarget)}` : 'Nothing invested yet this month';
+    if (b.key === 'savings') return pl.savingsPlanned > 0 ? `Moves to savings ${M.money0(pl.savingsPlanned)}` : pl.saved > 0 ? 'Moved to savings this month' : 'Nothing saved yet this month';
+    return `Left for dining out, fun and shopping · ${M.money0(pl.guiltFreeSpent)} spent so far`;
+  };
+  return `<section class="card split-card"><h2>How your pay splits</h2>
+    <div class="split-bar">${pl.split.map((b, i) => (pos[i] > 0.001 ? `<span style="width:${(pos[i] * scale * 100).toFixed(2)}%;background:${SPLIT_COLOR[b.key]}" data-tip="${esc(b.label)}: ${Math.round(b.share * 100)}%"></span>` : '')).join('')}</div>
+    <div class="split-rows">${pl.split.map((b) => { const [st, cls] = splitStatus(b); return `<div class="split-row">
+      <span class="dot" style="background:${SPLIT_COLOR[b.key]}"></span>
+      <div class="grow"><div class="t">${b.label}<span class="amt">${M.money0(b.amount)} · ${Math.round(b.share * 100)}%</span></div>
+        <div class="s">${detail(b)}</div>
+        <div class="s"><span class="${cls}">Target ${b.target} · ${st}</span></div></div></div>`; }).join('')}</div>
+    <p class="small muted" style="margin-top:12px">Targets from a popular spending plan: fixed costs 50–60% of take-home, investments about 10%, savings 5–10% and guilt-free spending 25–30%. A guide, not a rule. Money your employer takes for a 401(k) or HSA isn't in take-home, so it isn't counted here.</p>
+  </section>`;
 }
 
 // ---------- weekly goals + net worth on the overview ----------
