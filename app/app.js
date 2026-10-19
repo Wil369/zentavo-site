@@ -34,15 +34,18 @@ const ICON = {
   bag: '<path d="M5 8h14l-1 12H6z"/><path d="M9 8a3 3 0 0 1 6 0"/>',
   star: '<path d="M12 4l2.4 5 5.6.6-4.2 3.8 1.2 5.6L12 16.3 7 19l1.2-5.6L4 9.6 9.6 9z"/>',
   heart: '<path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z"/>',
+  networth: '<path d="M3 17l6-6 4 4 8-8"/><path d="M15 7h6v6"/>',
+  family: '<circle cx="8" cy="7" r="2.6"/><circle cx="16" cy="7" r="2.6"/><path d="M3.5 20v-4.5A3.5 3.5 0 0 1 7 12h2a3.5 3.5 0 0 1 3.5 3.5V20M11.5 20v-4.5A3.5 3.5 0 0 1 15 12h2a3.5 3.5 0 0 1 3.5 3.5V20"/>',
+  flame: '<path d="M12 21c-3.9 0-6.5-2.6-6.5-6.2 0-3.3 2.4-5.4 3.9-7.6.4 1.6 1.2 2.7 2.4 3.3C12 7.4 13.4 5 15.6 3c.2 3 3 5.4 3 10.1 0 4.6-2.8 7.9-6.6 7.9z"/>',
   coin: '<circle cx="12" cy="12" r="8"/><path d="M12 8v8M9.5 10h4a1.5 1.5 0 0 1 0 3h-3a1.5 1.5 0 0 0 0 3h4"/>',
   dot: '<circle cx="12" cy="12" r="3"/>',
 };
 const svg = (name, cls = '') => `<svg viewBox="0 0 24 24" class="${cls}" aria-hidden="true">${ICON[name] || ICON.dot}</svg>`;
 const catIcon = (c) => ({ Housing: 'home', 'Food & Groceries': 'cart', Transportation: 'car', Subscriptions: 'repeat', Shopping: 'bag',
-  Entertainment: 'star', 'Personal Care': 'heart', Healthcare: 'heart', Salary: 'coin', Savings: 'coin' }[c] || 'dot');
+  Entertainment: 'star', 'Personal Care': 'heart', Healthcare: 'heart', Salary: 'coin', Savings: 'coin', Family: 'family', Giving: 'heart' }[c] || 'dot');
 
 // Fixed category → series slot, so a category keeps its color everywhere (never by rank).
-const CAT_SLOT = { Bills: 1, 'Food & Groceries': 2, Transportation: 3, Shopping: 4, Entertainment: 5, 'Personal Care': 6, Healthcare: 6, Other: 8, Savings: 7, Education: 8, Subscriptions: 1, Housing: 1 };
+const CAT_SLOT = { Bills: 1, 'Food & Groceries': 2, Transportation: 3, Shopping: 4, Entertainment: 5, 'Personal Care': 6, Healthcare: 6, Other: 8, Savings: 7, Education: 8, Subscriptions: 1, Housing: 1, Family: 7, Giving: 7 };
 const slotColor = (c) => `var(--s${CAT_SLOT[c] || 8})`;
 
 // ---------- tooltip ----------
@@ -112,11 +115,12 @@ function brandMark() {
 
 // ---------- shell ----------
 const VIEWS = [
-  ['overview', 'Overview'], ['transactions', 'Transactions'], ['bills', 'Bills & splits'], ['paychecks', 'Paychecks'], ['goals', 'Goals & debts'],
+  ['overview', 'Overview'], ['transactions', 'Transactions'], ['bills', 'Bills & splits'], ['paychecks', 'Paychecks'], ['goals', 'Goals'], ['networth', 'Net worth'],
 ];
 
 function render() {
   const d = state.data;
+  M.useHabits(d);
   if (!VIEWS.some(([k]) => k === state.view)) state.view = 'overview';
   const hour = new Date().getHours();
   const greeting = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
@@ -152,7 +156,7 @@ function render() {
   }));
   document.getElementById('refresh')?.addEventListener('click', () => loadFromCloud().catch((e) => alertBanner(e.message)));
   const view = document.getElementById('view');
-  ({ overview: viewOverview, transactions: viewTransactions, bills: viewBills, paychecks: viewPaychecks, goals: viewGoals })[state.view](view, d);
+  ({ overview: viewOverview, transactions: viewTransactions, bills: viewBills, paychecks: viewPaychecks, goals: viewGoals, networth: viewNetWorth })[state.view](view, d);
 }
 
 function alertBanner(message) {
@@ -205,6 +209,8 @@ function viewOverview(el, d) {
       <h2>Next 14 days ${p ? `<span class="chip mint">Payday ${M.sameDay(p.next, today) ? 'today' : `in ${Math.round((p.next - today) / 86400000)} days`}</span>` : ''}</h2>
       ${upcomingStrip(d, p, today)}
     </section>
+
+    ${overviewGoals(d, now)}
 
     <section class="grid two">
       <div class="card">
@@ -492,7 +498,7 @@ function viewBills(el, d) {
   const pays = p ? M.projectedPaydays(p, M.addDays(today, 31)) : [];
   const timeline = [...events.map((e) => ({ ...e, kind: 'bill' })), ...pays.map((x) => ({ date: x.day, title: 'Payday', amount: x.amount, kind: 'pay' }))].sort((a, b) => a.date - b.date);
   el.innerHTML = `
-    <section class="grid kpis" style="grid-template-columns:repeat(3,1fr)">
+    <section class="grid kpis three">
       <div class="card"><h2>Bills this month</h2><div class="kpi-val">${M.money(total)}</div><div class="kpi-sub">${counted.length} counted in your daily limit</div></div>
       <div class="card"><h2>Covered by others</h2><div class="kpi-val">${M.money(saved)}</div><div class="kpi-sub">the other share of split bills, not counted as yours</div></div>
       <div class="card"><h2>Next 31 days</h2><div class="kpi-val">${M.money(events.reduce((s, e) => s + e.amount, 0))}</div><div class="kpi-sub">${events.length} bills due</div></div>
@@ -561,21 +567,178 @@ function viewPaychecks(el, d) {
     </section>`;
 }
 
-// ---------- goals ----------
-function viewGoals(el, d) {
-  el.innerHTML = `
+// ---------- weekly goals + net worth on the overview ----------
+function overviewGoals(d, now) {
+  const habits = (d.habitGoals || []).map((g) => ({ g, p: M.habitProgress(g, d.transactions, now) }));
+  const nw = M.netWorth(d);
+  const hasNet = (d.assets || []).length > 0;
+  if (!habits.length && !hasNet) return '';
+  const history = M.netWorthHistory(d);
+  const first = history.find((h) => h.day >= M.addDays(now, -30)) || history[0];
+  const change = first && !M.sameDay(first.day, now) ? nw.net - first.net : null;
+  return `
     <section class="grid halves">
-      <div class="card"><h2>Savings goals</h2>
-        ${d.goals.length ? d.goals.map((g) => `<div class="progress-row"><div class="top"><b>${esc(g.name)}</b><span class="num">${M.money0(g.currentAmount)} of ${M.money0(g.targetAmount)}</span></div>
-          <div class="bar"><span style="width:${pct(g.currentAmount, g.targetAmount)}%"></span></div>
-          <div class="small muted">${Math.round(pct(g.currentAmount, g.targetAmount))}% saved${g.deadline ? ` · by ${fmtDay(g.deadline, { month: 'short', year: 'numeric' })}` : ''}</div></div>`).join('') : '<div class="empty-state">No savings goals</div>'}
+      <div class="card"><h2>${habits.every((h) => h.p.weekly) ? 'Weekly goals' : 'Repeating goals'} <button class="link" data-goto="goals">See all</button></h2>
+        ${habits.length ? habits.map(({ g, p }) => habitHeader(g, p)).join('') : '<div class="empty-state">No weekly goals yet. Add one on your iPhone, like Mom &amp; Dad $50 a week.</div>'}
       </div>
-      <div class="card"><h2>Debts</h2>
-        ${d.debts.length ? d.debts.map((x) => `<div class="progress-row"><div class="top"><b>${esc(x.name)}</b><span class="num">${M.money(x.remainingBalance)} left</span></div>
-          <div class="bar"><span style="width:${pct(x.amountPaid, x.totalAmount)}%"></span></div>
-          <div class="small muted">${Math.round(pct(x.amountPaid, x.totalAmount))}% paid${x.minimumPayment ? ` · ${M.money(x.minimumPayment)} minimum` : ''}${x.interestRate ? ` · ${x.interestRate}% APR` : ''}</div></div>`).join('') : '<div class="empty-state">No debts. Nice.</div>'}
+      <div class="card"><h2>Net worth <button class="link" data-goto="networth">Details</button></h2>
+        ${hasNet ? `<div class="kpi-val ${nw.net < 0 ? 'status-bad' : ''}">${M.money0(nw.net)}</div>
+          <div class="kpi-sub">own <b>${M.money0(nw.assets)}</b> · owe <b>${M.money0(nw.liabilities)}</b>${change !== null && Math.abs(change) >= 1 ? ` · <b class="${change >= 0 ? 'status-good' : 'status-bad'}">${change >= 0 ? '+' : '−'}${M.money0(Math.abs(change))}</b> since ${fmtDay(first.day)}` : ''}</div>
+          ${history.length >= 2 ? netWorthChart(history, 80, false) : ''}`
+        : '<div class="empty-state">Add what you own on your iPhone (Home → Net worth) to see it here.</div>'}
       </div>
     </section>`;
+}
+
+function habitHeader(g, p) {
+  const tint = p.met ? '' : p.done > 0 ? 'amber' : '';
+  return `<div class="progress-row">
+    <div class="top"><b>${svg(g.kind === 'family' ? 'family' : g.kind === 'giving' ? 'heart' : 'coin', 'inline-ic')} ${esc(g.name)}</b>
+      <span class="num ${p.met ? 'status-good' : ''}">${M.money0(p.done)} of ${M.money0(p.target)}</span></div>
+    <div class="bar ${tint}"><span style="width:${pct(p.done, p.target)}%"></span></div>
+    <div class="small muted">${esc(p.status)}${p.streak >= 2 ? ` · <span class="streak">${svg('flame', 'inline-ic')}${p.streak} ${p.word}s in a row</span>` : ''}</div>
+  </div>`;
+}
+
+// ---------- goals ----------
+function viewGoals(el, d) {
+  const now = new Date();
+  const habits = (d.habitGoals || []).map((g) => ({ g, p: M.habitProgress(g, d.transactions, now) }));
+  const groups = [['short', 'Short term', 'Within a year'], ['long', 'Long term', 'More than a year out'], ['someday', 'Someday', 'No date yet']]
+    .map(([k, title, caption]) => ({ title, caption, goals: d.goals.filter((g) => M.goalHorizon(g, now) === k)
+      .sort((a, b) => (a.deadline || Infinity) - (b.deadline || Infinity)) }))
+    .filter((x) => x.goals.length);
+  const saved = d.goals.reduce((s, g) => s + g.currentAmount, 0);
+  const target = d.goals.reduce((s, g) => s + g.targetAmount, 0);
+  const perWeek = d.goals.reduce((s, g) => s + (M.goalPerWeek(g, now) || 0), 0);
+  const week = habits[0];
+
+  el.innerHTML = `
+    <section class="grid kpis three">
+      <div class="card"><h2>Saved toward goals</h2><div class="hero-num">${M.money0(saved)}</div>
+        <div class="bar"><span style="width:${pct(saved, target)}%"></span></div>
+        <div class="kpi-sub">of <b>${M.money0(target)}</b> across ${d.goals.length} savings goal${d.goals.length === 1 ? '' : 's'}</div></div>
+      <div class="card"><h2>To stay on time</h2><div class="kpi-val">${perWeek > 0 ? `${M.money0(Math.ceil(perWeek))} a week` : '—'}</div>
+        <div class="kpi-sub">${perWeek > 0 ? `about <b>${M.money0(Math.ceil((perWeek * 52) / 12))}</b> a month keeps every dated goal on schedule` : 'Add a date to a goal to get a weekly number'}</div></div>
+      <div class="card"><h2>This ${week ? week.p.word : 'week'}</h2>
+        ${week ? `<div class="kpi-val ${week.p.met ? 'status-good' : ''}">${M.money0(week.p.done)} <span class="muted small">of ${M.money0(week.p.target)}</span></div>
+          <div class="kpi-sub">${esc(week.g.name)} · ${esc(week.p.status)}</div>` : '<div class="kpi-val muted">—</div><div class="kpi-sub">No weekly goals yet</div>'}</div>
+    </section>
+
+    <section class="card" style="margin-bottom:18px">
+      <h2>Weekly goals <span class="legend" style="margin:0"><span><i class="sw" style="background:var(--mint)"></i>Hit it</span><span><i class="sw" style="background:var(--amber)"></i>Some</span><span><i class="sw" style="background:var(--line-2)"></i>None</span></span></h2>
+      ${habits.length ? `<div class="habit-grid">${habits.map(({ g, p }) => habitBlock(g, p)).join('')}</div>`
+        : `<div class="empty-state">Goals you keep every week, like sending Mom &amp; Dad $50, giving, or saving $25. Add one on your iPhone: Home → Weekly goals.</div>`}
+    </section>
+
+    <section class="grid ${groups.length >= 3 ? 'thirds' : 'halves'}">
+      ${groups.map((grp) => `<div class="card"><h2>${grp.title} <span class="small muted" style="text-transform:none;letter-spacing:0">${grp.caption}</span></h2>
+        ${grp.goals.map((g) => savingsRow(g, now)).join('')}</div>`).join('') || '<div class="card"><div class="empty-state">No savings goals yet. Add one on your iPhone, like a vacation or an emergency fund.</div></div>'}
+    </section>`;
+  el.querySelectorAll('[data-goto]').forEach((b) => b.addEventListener('click', () => { state.view = b.dataset.goto; history.replaceState(null, '', `#${state.view}`); render(); }));
+}
+
+function habitBlock(g, p) {
+  const peak = Math.max(...p.history.map((h) => h.amount), p.target, 1);
+  const labels = p.history.map((h) => (p.weekly ? `${h.start.getMonth() + 1}/${h.start.getDate()}` : h.start.toLocaleDateString('en-US', { month: 'short' })));
+  return `<div class="habit">
+    ${habitHeader(g, p)}
+    ${p.history.length ? `<div class="cols short">${p.history.map((h, i) => `<div class="col" data-tip="<b>${p.weekly ? 'Week of ' : ''}${labels[i]}</b><br>${M.money(h.amount)} ${h.met ? '· hit it' : h.amount > 0 ? `· ${M.money0(p.target - h.amount)} short` : '· none'}">
+        <div class="colbar ${h.met ? '' : h.amount > 0 ? 'amber' : 'none'}" style="height:${Math.max((h.amount / peak) * 100, 3)}%"></div></div>`).join('')}</div>
+      <div class="col-labels">${labels.map((l) => `<span>${l}</span>`).join('')}</div>
+      <p class="small muted" style="margin-top:8px">Hit it ${p.history.filter((h) => h.met).length} of the last ${p.history.length} ${p.word}s.</p>` : ''}
+    ${p.matches.length ? `<div class="rows" style="margin-top:6px">${p.matches.slice(0, 3).map((t) => `<div class="row">
+        <span class="ic">${svg(catIcon(t.category))}</span>
+        <div class="grow"><div class="t">${esc(t.title)}</div><div class="s">${fmtDay(t.date, { weekday: 'short', month: 'short', day: 'numeric' })}${t.notes ? ` · ${esc(t.notes)}` : ''}</div></div>
+        <span class="amt">${M.money(t.amount)}</span></div>`).join('')}</div>` : ''}
+  </div>`;
+}
+
+function savingsRow(g, now) {
+  const perWeek = M.goalPerWeek(g, now);
+  const left = Math.max(g.targetAmount - g.currentAmount, 0);
+  const done = left <= 0;
+  return `<div class="progress-row">
+    <div class="top"><b>${esc(g.name)}</b><span class="num">${M.money0(g.currentAmount)} of ${M.money0(g.targetAmount)}</span></div>
+    <div class="bar"><span style="width:${pct(g.currentAmount, g.targetAmount)}%"></span></div>
+    <div class="small muted">${done ? '<b class="status-good">Reached</b>' : perWeek ? `<b>${M.money0(Math.ceil(perWeek))} a week</b> gets you there by ${fmtDay(g.deadline, { month: 'short', year: 'numeric' })}` : `${M.money0(left)} to go · no date`}</div>
+  </div>`;
+}
+
+// ---------- net worth ----------
+const ASSET_ORDER = ['Checking & cash', 'Savings', 'Investments', 'Retirement', 'Crypto', 'Home & property', 'Vehicles', 'Other'];
+
+function viewNetWorth(el, d) {
+  const now = new Date();
+  const nw = M.netWorth(d);
+  const history = M.netWorthHistory(d);
+  const assets = d.assets || [];
+  const debts = d.debts.filter((x) => x.remainingBalance > 0.004).sort((a, b) => b.remainingBalance - a.remainingBalance);
+  if (!assets.length && !debts.length) {
+    el.innerHTML = `<div class="card"><div class="empty-state">
+      <p style="color:var(--text);font-weight:800;font-size:18px;margin-bottom:8px">Everything you own, minus what you owe.</p>
+      On your iPhone, open Home → Net worth and type in your balances: checking, savings, investments, retirement, even your car. No bank login. They show up here right away.</div></div>`;
+    return;
+  }
+  const first = history.find((h) => h.day >= M.addDays(now, -30)) || history[0];
+  const change = first && !M.sameDay(first.day, now) ? nw.net - first.net : null;
+  const firstEver = history[0];
+  const kinds = ASSET_ORDER.map((k) => ({ k, items: assets.filter((a) => (ASSET_ORDER.includes(a.kind) ? a.kind : 'Other') === k) }))
+    .filter((x) => x.items.length)
+    .map((x) => ({ ...x, total: x.items.reduce((s, a) => s + a.value, 0) }));
+  const maxKind = Math.max(...kinds.map((x) => x.total), 1);
+  const stale = assets.filter((a) => now - a.updatedAt > 35 * 86400000);
+
+  el.innerHTML = `
+    <section class="grid kpis">
+      <div class="card"><h2>Net worth</h2><div class="hero-num ${nw.net < 0 ? 'over' : ''}">${M.money0(nw.net)}</div>
+        <div class="kpi-sub">${change !== null && Math.abs(change) >= 1 ? `<b class="${change >= 0 ? 'status-good' : 'status-bad'}">${change >= 0 ? '+' : '−'}${M.money0(Math.abs(change))}</b> since ${fmtDay(first.day)}` : 'Typed in by you. No bank login.'}</div></div>
+      <div class="card"><h2>You own</h2><div class="kpi-val">${M.money0(nw.assets)}</div><div class="kpi-sub">${assets.length} account${assets.length === 1 ? '' : 's'} and things</div></div>
+      <div class="card"><h2>You owe</h2><div class="kpi-val ${nw.liabilities > 0 ? 'status-bad' : ''}">${M.money0(nw.liabilities)}</div><div class="kpi-sub">${debts.length} debt${debts.length === 1 ? '' : 's'} from your Debts tab</div></div>
+      <div class="card"><h2>Since you started</h2>${firstEver && history.length >= 2 ? `<div class="kpi-val ${nw.net - firstEver.net >= 0 ? 'status-good' : 'status-bad'}">${nw.net - firstEver.net >= 0 ? '+' : '−'}${M.money0(Math.abs(nw.net - firstEver.net))}</div><div class="kpi-sub">since ${fmtDay(firstEver.day, { month: 'short', day: 'numeric', year: 'numeric' })}</div>` : '<div class="kpi-val muted">—</div><div class="kpi-sub">The line starts the day you add something</div>'}</div>
+    </section>
+    ${history.length >= 2 ? `<section class="card" style="margin-bottom:18px"><h2>Over time</h2>${netWorthChart(history, 220, true)}</section>` : ''}
+    <section class="grid halves">
+      <div class="card"><h2>What you own</h2>
+        ${kinds.map((x) => `<div class="progress-row">
+          <div class="top"><b>${esc(x.k)}</b><span class="num">${M.money0(x.total)}</span></div>
+          <div class="bar"><span style="width:${(x.total / maxKind) * 100}%"></span></div>
+          <div class="small muted">${x.items.map((a) => `${esc(a.name)} ${M.money0(a.value)}`).join(' · ')}</div></div>`).join('') || '<div class="empty-state">Nothing added yet</div>'}
+        ${stale.length ? `<p class="note" style="margin-top:10px">${esc(stale[0].name)} hasn't been updated in a while. Update it on your iPhone so this stays true.</p>` : ''}
+      </div>
+      <div class="card"><h2>What you owe</h2>
+        ${debts.length ? debts.map((x) => `<div class="progress-row"><div class="top"><b>${esc(x.name)}</b><span class="num status-bad">${M.money(x.remainingBalance)}</span></div>
+          <div class="bar"><span style="width:${pct(x.amountPaid, x.totalAmount)}%"></span></div>
+          <div class="small muted">${Math.round(pct(x.amountPaid, x.totalAmount))}% paid off${x.minimumPayment ? ` · ${M.money(x.minimumPayment)} minimum` : ''}${x.interestRate ? ` · ${x.interestRate}% APR` : ''}</div></div>`).join('') : '<div class="empty-state">No debts. Nice.</div>'}
+        ${d.goals.length ? '<p class="small muted" style="margin-top:10px">Money in your savings goals sits inside your accounts, so it\'s already counted in what you own.</p>' : ''}
+      </div>
+    </section>`;
+}
+
+/** Net worth line. `full` adds axis labels and point tooltips. */
+function netWorthChart(history, height, full) {
+  const W = 800, H = height, padL = full ? 64 : 4, padR = 8, padT = 10, padB = full ? 26 : 6;
+  const xs = history.map((h) => h.day.getTime());
+  const ys = history.map((h) => h.net);
+  const x0 = Math.min(...xs), x1 = Math.max(...xs);
+  let y0 = Math.min(...ys), y1 = Math.max(...ys);
+  const padY = Math.max((y1 - y0) * 0.12, 50);
+  y0 -= padY; y1 += padY;
+  const X = (t) => padL + ((t - x0) / Math.max(x1 - x0, 1)) * (W - padL - padR);
+  const Y = (v) => padT + (1 - (v - y0) / Math.max(y1 - y0, 1)) * (H - padT - padB);
+  const pts = history.map((h) => [X(h.day.getTime()), Y(h.net)]);
+  const line = pts.map(([x, y], i) => `${i ? 'L' : 'M'}${x.toFixed(1)},${y.toFixed(1)}`).join('');
+  const area = `${line}L${pts[pts.length - 1][0].toFixed(1)},${H - padB}L${pts[0][0].toFixed(1)},${H - padB}Z`;
+  const ticks = full ? [y0 + padY, (y0 + y1) / 2, y1 - padY] : [];
+  const xTicks = full ? [0, Math.floor((history.length - 1) / 2), history.length - 1] : [];
+  return `<svg class="nw-chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Net worth over time, now ${M.money0(ys[ys.length - 1])}">
+    <defs><linearGradient id="nwfill${H}" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="#5EE6A8" stop-opacity=".28"/><stop offset="1" stop-color="#5EE6A8" stop-opacity="0"/></linearGradient></defs>
+    ${ticks.map((v) => `<line x1="${padL}" x2="${W - padR}" y1="${Y(v)}" y2="${Y(v)}" class="grid-line"/><text x="${padL - 8}" y="${Y(v) + 4}" text-anchor="end" class="axis">${compact(Math.round(v))}</text>`).join('')}
+    <path d="${area}" fill="url(#nwfill${H})"/>
+    <path d="${line}" fill="none" stroke="#5EE6A8" stroke-width="2.5" vector-effect="non-scaling-stroke" stroke-linejoin="round" stroke-linecap="round"/>
+    ${xTicks.map((i) => `<text x="${pts[i][0]}" y="${H - 6}" text-anchor="${i === 0 ? 'start' : i === history.length - 1 ? 'end' : 'middle'}" class="axis">${fmtDay(history[i].day)}</text>`).join('')}
+    ${full ? pts.map(([x, y], i) => `<circle cx="${x}" cy="${y}" r="9" fill="transparent" data-tip="<b>${fmtDay(history[i].day, { month: 'short', day: 'numeric', year: 'numeric' })}</b><br>Net worth ${M.money0(history[i].net)}<br>own ${M.money0(history[i].assets)} · owe ${M.money0(history[i].liabilities)}"/>`).join('') : ''}
+  </svg>`;
 }
 
 window.addEventListener('hashchange', () => { state.view = location.hash.slice(1) || 'overview'; if (state.data) render(); });

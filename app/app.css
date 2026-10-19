@@ -221,3 +221,22 @@ td.amt.in { color: var(--mint); }
 @media (forced-colors: active) {
   .cal-cell.under, .cal-cell.close, .cal-cell.over { border-width: 2px; }
 }
+
+/* ---------- goals & net worth ---------- */
+.grid.thirds { grid-template-columns: repeat(3, 1fr); margin-bottom: 18px; }
+.habit-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 24px; }
+.habit .progress-row { border-top: 0; padding-top: 0; }
+.inline-ic { width: 15px; height: 15px; stroke: var(--mint); fill: none; stroke-width: 1.9; vertical-align: -2px; margin-right: 4px; }
+.streak { color: var(--amber); font-weight: 800; white-space: nowrap; }
+.streak .inline-ic { stroke: var(--amber); margin-right: 3px; }
+.cols.short { height: 96px; }
+.col .colbar.amber { background: var(--amber); }
+.col .colbar.none { background: var(--line-2); }
+.num.status-good, .num.status-bad { font-weight: 800; }
+.nw-chart { width: 100%; display: block; margin-top: 10px; overflow: visible; }
+.nw-chart .grid-line { stroke: var(--line); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.nw-chart .axis { fill: var(--muted); font-size: 11px; font-weight: 700; font-family: inherit; }
+@media (max-width: 1180px) { .grid.thirds { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 980px) { .grid.thirds { grid-template-columns: 1fr; } .habit-grid { grid-template-columns: 1fr; } }
+.grid.kpis.three { grid-template-columns: repeat(3, 1fr); }
+@media (max-width: 760px) { .grid.kpis.three { grid-template-columns: 1fr; } }

@@ -142,12 +142,27 @@ export function mapRecords(records) {
 
   const goals = of('SavingsGoal').map((r) => ({
     name: str(r, 'name'), targetAmount: num(r, 'targetAmount'), currentAmount: num(r, 'currentAmount'),
-    deadline: date(r, 'deadline'), isArchived: bool(r, 'isArchived'),
+    deadline: date(r, 'deadline'), isArchived: bool(r, 'isArchived'), icon: str(r, 'icon', 'banknote.fill'),
   })).filter((g) => !g.isArchived);
 
   const budgets = of('CategoryBudget').map((r) => ({ category: str(r, 'category'), limit: num(r, 'limit') }));
 
-  return { transactions, settings: settingsList[0] || null, debts, goals, budgets, counts, source: 'icloud' };
+  const habitGoals = of('HabitGoal').map((r) => ({
+    name: str(r, 'name'), kind: str(r, 'kind', 'family'), targetAmount: num(r, 'targetAmount'), period: str(r, 'period', 'week'),
+    category: str(r, 'category', 'Family'), matchWords: str(r, 'matchWords'), createdDate: date(r, 'createdDate') || new Date(0),
+    isArchived: bool(r, 'isArchived'),
+  })).filter((g) => !g.isArchived);
+
+  const assets = of('Asset').map((r) => ({
+    name: str(r, 'name'), kind: str(r, 'kind', 'Other'), value: num(r, 'value'), note: str(r, 'note'),
+    updatedAt: date(r, 'updatedAt') || new Date(0),
+  }));
+
+  const snapshots = of('NetWorthSnapshot').map((r) => ({
+    day: date(r, 'day') || new Date(0), assets: num(r, 'assets'), liabilities: num(r, 'liabilities'),
+  }));
+
+  return { transactions, settings: settingsList[0] || null, debts, goals, budgets, habitGoals, assets, snapshots, counts, source: 'icloud' };
 }
 
 // ---------- sample data (for visitors, and before iCloud is connected) ----------
@@ -206,11 +221,41 @@ export function sampleData(now = new Date()) {
   }
   add({ title: 'Savings: Emergency fund', amount: 150, type: 'expense', category: 'Savings', date: addDays(monthStart(today), 2) });
 
+  // Money sent home by Zelle most weeks, with the memo in the note.
+  let sunday = addDays(start, -start.getDay());
+  for (let w = 0; sunday <= today; w++, sunday = addDays(sunday, 7)) {
+    if (w % 5 === 3) continue; // a missed week
+    const day = addDays(sunday, 1 + (w % 3));
+    if (day > now) break;
+    add({ title: 'Zelle to Marie J.', amount: w % 4 === 1 ? 40 : 50 + (w % 3) * 10, type: 'expense', category: 'Family', date: new Date(day.getTime() + 9 * 3600e3), notes: w % 2 ? 'For Dad' : 'For Mom' });
+  }
+
+  const ago = (days) => addDays(today, -days);
+  const snapshots = [];
+  for (let k = 16; k >= 0; k--) {
+    const drift = (16 - k) * 145 + Math.round(Math.sin(k) * 120);
+    snapshots.push({ day: ago(k * 7), assets: 14_870 + drift, liabilities: 1_800 - (16 - k) * 40 });
+  }
+
   return {
     transactions: tx,
     settings: { monthlyBudgetGoal: 2600, dailyLimit: 0, dailyLimitMode: 'paychecks', paySchedule: 'weekly:4', updatedAt: now },
     debts: [{ name: 'Credit card', totalAmount: 1800, amountPaid: 640, remainingBalance: 1160, minimumPayment: 45, dueDate: new Date(today.getFullYear(), today.getMonth(), 16), interestRate: 24.9 }],
-    goals: [{ name: 'Emergency fund', targetAmount: 3000, currentAmount: 1240 }, { name: 'Trip home', targetAmount: 1200, currentAmount: 410 }],
+    goals: [
+      { name: 'Trip home', targetAmount: 1200, currentAmount: 410, deadline: addMonths(today, 5), icon: 'heart.fill' },
+      { name: 'Emergency fund', targetAmount: 3000, currentAmount: 1240, deadline: addMonths(today, 10), icon: 'umbrella.fill' },
+      { name: 'Home down payment', targetAmount: 20000, currentAmount: 2100, deadline: addMonths(today, 48), icon: 'house.fill' },
+      { name: 'New laptop', targetAmount: 1200, currentAmount: 260, deadline: null, icon: 'laptopcomputer' },
+    ],
+    habitGoals: [{ name: 'Mom & Dad', kind: 'family', targetAmount: 50, period: 'week', category: 'Family', matchWords: 'Mom, Dad', createdDate: start, isArchived: false }],
+    assets: [
+      { name: 'Checking', kind: 'Checking & cash', value: 2140, updatedAt: ago(2) },
+      { name: 'Emergency savings', kind: 'Savings', value: 1240, updatedAt: ago(9) },
+      { name: 'Roth IRA', kind: 'Retirement', value: 3850, updatedAt: ago(20) },
+      { name: 'Brokerage', kind: 'Investments', value: 1460, updatedAt: ago(20) },
+      { name: '2016 Toyota Corolla', kind: 'Vehicles', value: 8500, updatedAt: ago(60) },
+    ],
+    snapshots,
     budgets: [],
     counts: {},
     source: 'sample',

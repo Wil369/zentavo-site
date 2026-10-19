@@ -30,7 +30,8 @@ export const isTemplate = (t) => t.isRecurring && !!t.recurringFrequency && !t.r
 export const isGenerated = (t) => !!t.recurringTemplateID;
 export const isSpending = (t) => t.type === 'expense' && t.category !== SAVINGS;
 export const isBill = (t) => isTemplate(t) || isGenerated(t) || t.category === DEBT;
-export const countsForDay = (t) => isSpending(t) && !isBill(t);
+// Money a weekly goal plans for ("Mom & Dad $50 a week") never counts against the day.
+export const countsForDay = (t) => isSpending(t) && !isBill(t) && !isPlanned(t);
 export const share = (t) => (t.fullAmount && t.fullAmount > 0 ? Math.min(Math.max(t.amount / t.fullAmount, 0), 1) : 1);
 export function sharePhrase(s) {
   if (s > 0.49 && s < 0.51) return 'half';
@@ -140,7 +141,19 @@ export function billLines(data, month) {
       continue;
     }
     lines.push({ title, total, times: events.length, kind, counted: true, share: s, category: t.category,
-      fullTotal: s < 0.999 ? total / s : null, firstDate: events[0].date });
+      fullTotal: s < 0.999 ? total / s : null, firstDate: events[0].date, template: t });
+  }
+  // Weekly goals are set aside like bills; a repeating entry for the same thing isn't counted twice.
+  for (const g of (data.habitGoals || []).filter((x) => !x.isArchived && x.targetAmount > 0)) {
+    const r = habitRule(g);
+    for (const line of lines) {
+      if (line.counted && line.template && habitMatches(line.template, r)) {
+        line.counted = false;
+        line.note = `Covered by your “${g.name}” goal, so it isn't counted twice.`;
+      }
+    }
+    lines.push({ title: g.name, total: habitSetAside(g, month), times: 1, counted: true, category: g.category, habit: true,
+      kind: `${HABIT_KIND[g.kind] || 'Weekly'} goal · ${money0(g.targetAmount)} a ${r.weekly ? 'week' : 'month'}` });
   }
   for (const debt of data.debts) {
     if (debt.remainingBalance <= 0) continue;
@@ -381,3 +394,93 @@ const fmt0 = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD'
 export const money = (v) => fmt2.format(v || 0);
 export const money0 = (v) => fmt0.format(Math.round(v || 0));
 export const moneySmart = (v) => (Math.abs(v - Math.round(v)) < 0.005 ? money0(v) : money(v));
+
+// ---------- weekly goals ----------
+// Same rules as the iPhone: an entry counts when it's in the goal's category, or its name or
+// note mentions one of the goal's words (a Zelle memo like "Pou papam" lands in the note).
+export const HABIT_KIND = { family: 'Family support', giving: 'Giving', saving: 'Save regularly', custom: 'Weekly' };
+let RULES = [];
+const habitWords = (s) => (s || '').split(/[,;]/).map((w) => w.trim().toLowerCase()).filter((w) => w.length >= 2);
+
+export function habitRule(g) {
+  return { category: g.category, words: habitWords(g.matchWords), weekly: g.period !== 'month', target: g.targetAmount, start: g.createdDate || new Date(0) };
+}
+
+export function useHabits(data) {
+  RULES = (data.habitGoals || []).filter((g) => !g.isArchived && g.targetAmount > 0).map(habitRule);
+}
+
+export function habitMatches(t, r) {
+  if (t.type !== 'expense') return false;
+  if (r.category && r.category !== 'Other' && t.category === r.category) return true;
+  if (!r.words.length) return false;
+  const hay = `${t.title} ${t.notes || ''}`.toLowerCase();
+  return r.words.some((w) => hay.includes(w));
+}
+
+export const isPlanned = (t) => RULES.some((r) => habitMatches(t, r));
+
+function habitPeriod(weekly, date) {
+  if (!weekly) return { start: monthStart(date), end: monthEnd(date) };
+  const start = addDays(startOfDay(date), -date.getDay()); // weeks start Sunday, like the iPhone
+  return { start, end: addDays(start, 7) };
+}
+
+export function habitProgress(g, transactions, now = new Date()) {
+  const r = habitRule(g);
+  const sumIn = (p) => transactions.filter((t) => t.date >= p.start && t.date < p.end && habitMatches(t, r)).reduce((s, t) => s + t.amount, 0);
+  const met = (v) => r.target > 0 && v + 0.004 >= r.target;
+  const current = habitPeriod(r.weekly, now);
+  const done = sumIn(current);
+  const firstMatch = transactions.filter((t) => habitMatches(t, r)).reduce((m, t) => (t.date < m ? t.date : m), r.start);
+  const history = [];
+  let streak = 0, counting = true, cursor = current.start;
+  for (let i = 0; i < 104; i++) {
+    const prev = habitPeriod(r.weekly, new Date(cursor - 1000));
+    if (prev.end <= firstMatch) break;
+    const v = sumIn(prev);
+    if (history.length < 8) history.push({ start: prev.start, amount: v, met: met(v) });
+    if (counting) { if (met(v)) streak++; else counting = false; }
+    cursor = prev.start;
+    if (!counting && history.length >= 8) break;
+  }
+  if (met(done)) streak++;
+  const daysLeft = Math.max(dayDiff(now, current.end), 1);
+  const word = r.weekly ? 'week' : 'month';
+  const status = met(done)
+    ? (done > r.target + 0.004 ? `Done, ${money0(done - r.target)} extra` : `Done for this ${word}`)
+    : `${money0(r.target - done)} to go · ${daysLeft === 1 ? 'last day' : `${daysLeft} days left`}`;
+  return { done, target: r.target, met: met(done), streak, history: history.reverse(), word, status, weekly: r.weekly,
+    matches: transactions.filter((t) => habitMatches(t, r)).sort((a, b) => b.date - a.date) };
+}
+
+export function habitSetAside(g, month) {
+  return g.period === 'month' ? g.targetAmount : (g.targetAmount * daysInMonth(month)) / 7;
+}
+
+// ---------- net worth ----------
+export function netWorth(data) {
+  const assets = (data.assets || []).reduce((s, a) => s + a.value, 0);
+  const liabilities = data.debts.reduce((s, x) => s + Math.max(x.remainingBalance, 0), 0);
+  return { assets, liabilities, net: assets - liabilities };
+}
+
+export function netWorthHistory(data) {
+  const byDay = new Map();
+  for (const s of data.snapshots || []) byDay.set(startOfDay(s.day).getTime(), s);
+  return [...byDay.values()].sort((a, b) => a.day - b.day).map((s) => ({ day: s.day, net: s.assets - s.liabilities, assets: s.assets, liabilities: s.liabilities }));
+}
+
+// ---------- savings goals ----------
+/** Short term: due within a year. Long term: further out. Someday: no date. */
+export function goalHorizon(g, now = new Date()) {
+  if (!g.deadline) return 'someday';
+  return g.deadline <= addMonths(now, 12) ? 'short' : 'long';
+}
+
+export function goalPerWeek(g, now = new Date()) {
+  if (!g.deadline || g.deadline <= now) return null;
+  const left = Math.max(g.targetAmount - g.currentAmount, 0);
+  const weeks = Math.max((g.deadline - now) / (7 * DAY), 1);
+  return left / weeks;
+}
