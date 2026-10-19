@@ -169,7 +169,61 @@ export function billLines(data, month) {
       lines.push({ title: debt.name, total: 0, times: 1, kind: 'Debt', counted: false, note: 'No minimum payment set, so it isn\'t counted.' });
     }
   }
+  // Money moved to a separate bills account every payday: its bills are counted above; whatever
+  // goes in beyond them stays in that account, so it isn't in checking to spend either.
+  const move = billsMoveTotal(data, month);
+  if (move.total > 0) {
+    const paidFromIt = lines.filter((l) => l.counted && !l.habit && !l.budgetLike && !MOVED.has(l.category)).reduce((s, l) => s + l.total, 0);
+    const extra = move.total - paidFromIt;
+    if (extra >= 1) {
+      lines.push({ title: 'Kept in your bills account', total: extra, times: 1, counted: true, billsAccount: true, category: 'Housing',
+        kind: `${money0(move.total)} moved there this month, bills ${money0(paidFromIt)}`,
+        note: `You move ${money0(move.total)} to your bills account this month, and the bills here add up to ${money0(paidFromIt)}. The other ${money0(extra)} stays in that account, so it's set aside too.` });
+    }
+  }
   return lines.sort((a, b) => b.total - a.total);
+}
+
+// Moves to a separate bills account (AppSettings.moneyMoves, JSON written by the iPhone app;
+// dates are seconds since 2001-01-01, Swift's default).
+const APPLE_EPOCH = 978307200;
+export function billsMoves(data) {
+  try {
+    const raw = data.settings && data.settings.moneyMoves;
+    if (!raw) return [];
+    return JSON.parse(raw).map((m) => ({ amount: Number(m.amount) || 0, frequency: m.frequency || 'Monthly',
+      start: new Date((APPLE_EPOCH + Number(m.start || 0)) * 1000) })).filter((m) => m.amount > 0);
+  } catch { return []; }
+}
+
+export function moveDates(move, from, to) {
+  const anchor = startOfDay(move.start);
+  const step = (n) => {
+    if (move.frequency === 'Weekly') return addDays(anchor, 7 * n);
+    if (move.frequency === 'Biweekly') return addDays(anchor, 14 * n);
+    const y = anchor.getFullYear(), m = anchor.getMonth() + n;
+    return new Date(y, m, Math.min(anchor.getDate(), new Date(y, m + 1, 0).getDate()));
+  };
+  let n = 0;
+  while (n > -600 && step(n) >= from) n -= 1;
+  const out = [];
+  for (let guard = 0; guard < 600; guard++, n++) {
+    const day = step(n);
+    if (day >= to) break;
+    if (day >= from) out.push(day);
+  }
+  return out;
+}
+
+export function billsMoveTotal(data, month) {
+  const from = monthStart(month), to = monthEnd(month);
+  let total = 0, times = 0;
+  for (const m of billsMoves(data)) {
+    const count = moveDates(m, from, to).length;
+    total += m.amount * count;
+    times += count;
+  }
+  return { total, times };
 }
 
 export const billsInMonth = (data, month) => billLines(data, month).filter((l) => l.counted).reduce((s, l) => s + l.total, 0);
@@ -511,7 +565,8 @@ export function moneyPlan(data, now = new Date()) {
   const moved = (l) => !l.habit && MOVED.has(l.category);
   const bills = lines.filter((l) => !l.habit && !moved(l));
   const goals = lines.filter((l) => l.habit && l.habitKind !== 'investing');
-  const investGoals = lines.filter((l) => (l.habit && l.habitKind === 'investing') || moved(l));
+  const savingsMoves = lines.filter((l) => moved(l) && l.category === SAVINGS);
+  const investGoals = lines.filter((l) => (l.habit && l.habitKind === 'investing') || (moved(l) && l.category === INVESTING));
   const thisMonth = data.transactions.filter((t) => inMonth(t.date, now));
   const sum = (arr) => arr.reduce((s, t) => s + t.amount, 0);
   const everydaySpent = sum(thisMonth.filter((t) => countsForDay(t) && t.date <= now));
@@ -539,12 +594,15 @@ export function moneyPlan(data, now = new Date()) {
   const free = takeHome - billsTotal - goalsTotal;
   const paceEveryday = everydaySpent + perDay * daysLeft;
   const projectedEveryday = Math.max(paceEveryday, everydayBudgetTotal);
-  const canInvest = Math.max(free - projectedEveryday - saved, 0);
+  // Saved this month: what's moved already, or the planned moves when more is still to come.
+  const savingsPlanned = total(savingsMoves);
+  const savedInMonth = Math.max(saved, savingsPlanned);
+  const canInvest = Math.max(free - projectedEveryday - savedInMonth, 0);
   return {
-    takeHome, landed, paydayCount, landedCount, fromPaychecks, bills: bills.sort((a, b) => b.total - a.total), goals, investGoals,
+    takeHome, landed, paydayCount, landedCount, fromPaychecks, bills: bills.sort((a, b) => b.total - a.total), goals, investGoals, savingsMoves, savingsPlanned, savedInMonth,
     everydaySpent, perDay, paceDays, daysLeft, everydayBudgets, everydayBudgetTotal, usesBudgets: everydayBudgetTotal > paceEveryday, invested, saved, billsTotal, goalsTotal, investTarget, free, projectedEveryday,
-    canInvest, leftToInvest: Math.max(canInvest - invested, 0), leftThisMonth: free - everydaySpent - invested - saved,
-    used: billsTotal + goalsTotal + everydaySpent + invested + saved,
+    canInvest, leftToInvest: Math.max(canInvest - invested, 0), leftThisMonth: free - everydaySpent - invested - savedInMonth,
+    used: billsTotal + goalsTotal + everydaySpent + invested + savedInMonth,
     suggestedInvest: Math.floor((canInvest * 0.85) / 50) * 50,
   };
 }

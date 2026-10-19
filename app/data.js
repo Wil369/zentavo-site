@@ -1,6 +1,6 @@
 // Loads the person's Zentavo data from their private iCloud (CloudKit JS), or sample data.
-import { CONFIG } from './config.js?v=20261019g';
-import { addDays, addMonths, monthStart, startOfDay } from './money.js?v=20261019g';
+import { CONFIG } from './config.js?v=20261019h';
+import { addDays, addMonths, monthStart, startOfDay } from './money.js?v=20261019h';
 
 const CK_SCRIPT = 'https://cdn.apple-cloudkit.com/ck/2/cloudkit.js';
 
@@ -173,6 +173,7 @@ export function mapRecords(records) {
     dailyLimit: num(r, 'dailyLimit', 0),
     dailyLimitMode: str(r, 'dailyLimitMode'),
     paySchedule: str(r, 'paySchedule'),
+    moneyMoves: str(r, 'moneyMoves'),
     updatedAt: date(r, 'updatedAt') || new Date(0),
   }));
   settingsList.sort((a, b) => b.updatedAt - a.updatedAt);
@@ -229,6 +230,17 @@ export function sampleData(now = new Date()) {
   for (let i = 0; wed <= now; i++, wed = addDays(wed, 7)) {
     add({ title: 'Paycheck', amount: i % 2 ? 1186.42 : 604.18 + Math.round(rand() * 6000) / 100, type: 'income', category: 'Salary', date: new Date(wed.getTime() + 13 * 3600e3) });
   }
+  // Part of every other paycheck moved to savings (a repeating entry) and to a bills account.
+  let moveDay = new Date(start);
+  while (moveDay.getDay() !== 3) moveDay = addDays(moveDay, 1);
+  moveDay = new Date(addDays(moveDay, 7).getTime() + 20 * 3600e3);
+  add({ title: 'To savings', amount: 300, type: 'expense', category: 'Savings', date: moveDay, isRecurring: true, recurringFrequency: 'Biweekly' });
+  const savingsID = tx[tx.length - 1].id;
+  for (let d = addDays(moveDay, 14); d <= now; d = addDays(d, 14)) {
+    add({ title: 'To savings', amount: 300, type: 'expense', category: 'Savings', date: d, recurringTemplateID: savingsID });
+  }
+  const moneyMoves = JSON.stringify([{ amount: 700, frequency: 'Biweekly', start: moveDay.getTime() / 1000 - 978307200 }]);
+
   // Bills (templates dated at their first occurrence; past copies generated).
   const bill = (title, amount, category, day, full) => {
     const first = new Date(start.getFullYear(), start.getMonth(), day, 9);
@@ -282,7 +294,7 @@ export function sampleData(now = new Date()) {
 
   return {
     transactions: tx,
-    settings: { monthlyBudgetGoal: 2600, dailyLimit: 0, dailyLimitMode: 'paychecks', paySchedule: 'weekly:4', updatedAt: now },
+    settings: { monthlyBudgetGoal: 2600, dailyLimit: 0, dailyLimitMode: 'paychecks', paySchedule: 'weekly:4', moneyMoves, updatedAt: now },
     debts: [{ name: 'Credit card', totalAmount: 1800, amountPaid: 640, remainingBalance: 1160, minimumPayment: 45, dueDate: new Date(today.getFullYear(), today.getMonth(), 16), interestRate: 24.9 }],
     goals: [
       { name: 'Trip home', targetAmount: 1200, currentAmount: 410, deadline: addMonths(today, 5), icon: 'heart.fill' },

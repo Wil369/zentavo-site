@@ -1,6 +1,6 @@
-import { CONFIG } from './config.js?v=20261019g';
-import { cloudConfigured, connect, describeError, fetchAll, mapRecords, sampleData } from './data.js?v=20261019g';
-import * as M from './money.js?v=20261019g';
+import { CONFIG } from './config.js?v=20261019h';
+import { cloudConfigured, connect, describeError, fetchAll, mapRecords, sampleData } from './data.js?v=20261019h';
+import * as M from './money.js?v=20261019h';
 
 const root = document.getElementById('root');
 const tipEl = document.getElementById('tip');
@@ -618,13 +618,13 @@ function viewPlan(el, d) {
   const sub = (title, amount, hi) => `<div class="row subtotal ${hi ? 'hi' : ''}"><div class="grow"><div class="t">${title}</div></div><span class="amt">${M.money(amount)}</span></div>`;
   const investGoal = (d.habitGoals || []).find((g) => g.kind === 'investing');
   const limitNow = M.dailyLimit(d, now, now).amount;
-  const limitWith = Math.max(Math.floor((pl.free - Math.max(pl.suggestedInvest, 50)) / M.daysInMonth(now)), 0);
+  const limitWith = Math.max(Math.floor(limitNow - Math.max(pl.suggestedInvest, 50) / M.daysInMonth(now)), 0);
   el.innerHTML = `
     <section class="grid kpis">
       <div class="card"><h2>Left to invest in ${monthName}</h2><div class="hero-num ${pl.leftToInvest > 0 ? '' : 'over'}">${M.money0(pl.leftToInvest)}</div>
-        <div class="kpi-sub">${pl.canInvest <= 0 ? 'At your everyday pace, bills and spending use all of this month\'s pay.'
+        <div class="kpi-sub">${pl.canInvest <= 0 ? (pl.savedInMonth > 0 ? `Bills, your <b>${M.money0(pl.savedInMonth)}</b> to savings and everyday spending use this month's pay.` : 'At your everyday pace, bills and spending use all of this month\'s pay.')
           : pl.invested > 0 ? `You've invested <b>${M.money0(pl.invested)}</b> so far. About <b>${M.money0(pl.leftToInvest)}</b> more is free by ${end}.`
-          : `After rent, bills, goals and everyday spending${pl.usesBudgets ? ` (your <b>${M.money0(pl.everydayBudgetTotal)}</b> everyday budgets)` : pl.paceDays ? ` (about <b>${M.money0(pl.perDay)}</b> a day)` : ''}, free by ${end}.`}</div></div>
+          : `After bills${pl.goals.length ? ', goals' : ''}${pl.savedInMonth > 0 ? ', savings' : ''} and everyday spending${pl.usesBudgets ? ` (your <b>${M.money0(pl.everydayBudgetTotal)}</b> everyday budgets)` : pl.paceDays ? ` (about <b>${M.money0(pl.perDay)}</b> a day)` : ''}, free by ${end}.`}</div></div>
       <div class="card"><h2>Take-home</h2><div class="kpi-val">${M.money0(pl.takeHome)}</div><div class="kpi-sub">${pl.fromPaychecks ? `${pl.paydayCount} paychecks · ${pl.landedCount} in${coming > 0 ? `, ${coming} coming` : ''}` : 'income this month'}</div></div>
       <div class="card"><h2>Bills & goals</h2><div class="kpi-val">${M.money0(pl.billsTotal + pl.goalsTotal)}</div><div class="kpi-sub">your share only · ${pl.bills.length + pl.goals.length} items</div></div>
       <div class="card"><h2>Invested this month</h2><div class="kpi-val ${pl.invested > 0 ? 'status-good' : ''}">${M.money0(pl.invested)}</div><div class="kpi-sub">${investGoal ? `goal ${M.money0(investGoal.targetAmount)} a ${investGoal.period === 'month' ? 'month' : 'week'}` : 'Fidelity, Robinhood…'}</div></div>
@@ -633,11 +633,11 @@ function viewPlan(el, d) {
       <div class="card"><h2>Where your paychecks go</h2>
         <div class="rows">
           ${row('coin', 'Take-home', pl.fromPaychecks ? `${pl.paydayCount} paychecks · ${pl.landedCount} in${coming > 0 ? `, ${coming} coming` : ''}` : 'This month\'s income', pl.takeHome, '+', 'in')}
-          ${pl.bills.map((l) => row(catIcon(l.category), l.title, l.fullTotal ? `Your ${M.sharePhrase(l.share)} of ${M.money(l.fullTotal)}` : l.kind === 'Debt payment' ? 'Debt minimum' : l.times > 1 ? `${l.times} times this month` : 'Monthly', l.total, '−')).join('')}
+          ${pl.bills.map((l) => row(catIcon(l.category), l.title, l.billsAccount ? esc(l.kind) : l.fullTotal ? `Your ${M.sharePhrase(l.share)} of ${M.money(l.fullTotal)}` : l.kind === 'Debt payment' ? 'Debt minimum' : l.times > 1 ? `${l.times} times this month` : 'Monthly', l.total, '−')).join('')}
           ${pl.goals.map((l) => row('family', l.title, esc(l.kind), l.total, '−')).join('')}
           ${sub('Free after bills & goals', pl.free)}
           ${row('cart', 'Everyday spending', pl.usesBudgets ? `Your budgets: ${pl.everydayBudgets.slice(0, 3).map((b) => `${M.shortName(b.category)} ${M.money0(b.amount)}`).join(', ')} · ${M.money0(pl.everydaySpent)} spent so far` : pl.daysLeft && pl.paceDays ? `${M.money0(pl.everydaySpent)} so far + about ${M.money0(pl.perDay)} a day for ${pl.daysLeft} more days` : `${M.money0(pl.everydaySpent)} this month`, pl.projectedEveryday, '−')}
-          ${pl.saved > 0 ? row('coin', 'Moved to savings goals', 'This month', pl.saved, '−') : ''}
+          ${pl.savedInMonth > 0 ? row('coin', 'To savings', pl.savingsPlanned > 0 ? `${pl.savingsMoves.reduce((s, l) => s + l.times, 0)} moves this month${pl.saved > 0 ? ` · ${M.money0(pl.saved)} moved so far` : ''}` : 'This month', pl.savedInMonth, '−') : ''}
           ${pl.invested > 0 ? row('networth', 'Already invested', 'This month', pl.invested, '−') : ''}
           ${sub('Left to invest', pl.leftToInvest, true)}
         </div>
