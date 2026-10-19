@@ -1,6 +1,6 @@
 // Loads the person's Zentavo data from their private iCloud (CloudKit JS), or sample data.
-import { CONFIG } from './config.js?v=20261019j';
-import { addDays, addMonths, monthStart, startOfDay } from './money.js?v=20261019j';
+import { CONFIG } from './config.js?v=20261019k';
+import { addDays, addMonths, monthStart, startOfDay } from './money.js?v=20261019k';
 
 const CK_SCRIPT = 'https://cdn.apple-cloudkit.com/ck/2/cloudkit.js';
 
@@ -192,7 +192,7 @@ export function mapRecords(records) {
   const budgets = of('CategoryBudget').map((r) => ({ category: str(r, 'category'), limit: num(r, 'limit') }));
 
   const habitGoals = of('HabitGoal').map((r) => ({
-    name: str(r, 'name'), kind: str(r, 'kind', 'family'), targetAmount: num(r, 'targetAmount'), period: str(r, 'period', 'week'),
+    id: str(r, 'id') || r.recordName, name: str(r, 'name'), kind: str(r, 'kind', 'family'), targetAmount: num(r, 'targetAmount'), period: str(r, 'period', 'week'),
     category: str(r, 'category', 'Family'), matchWords: str(r, 'matchWords'), createdDate: date(r, 'createdDate') || new Date(0),
     isArchived: bool(r, 'isArchived'),
   })).filter((g) => !g.isArchived);

@@ -469,19 +469,29 @@ let RULES = [];
 const habitWords = (s) => (s || '').split(/[,;]/).map((w) => w.trim().toLowerCase()).filter((w) => w.length >= 2);
 
 export function habitRule(g) {
-  return { category: g.category, words: habitWords(g.matchWords), weekly: g.period !== 'month', target: g.targetAmount, start: g.createdDate || new Date(0) };
+  return { id: g.id || g.name, category: g.category, words: habitWords(g.matchWords), weekly: g.period !== 'month', target: g.targetAmount, start: g.createdDate || new Date(0) };
 }
 
 export function useHabits(data) {
   RULES = (data.habitGoals || []).filter((g) => !g.isArchived && g.targetAmount > 0).map(habitRule);
 }
 
+const mentions = (t, words) => {
+  if (!words.length) return false;
+  const hay = `${t.title} ${t.notes || ''}`.toLowerCase();
+  return words.some((w) => hay.includes(w));
+};
+
+// Two goals in one category (Mom $50 a week and Dad $50 a week, both Family): an entry goes to the
+// goal whose words it mentions, and one that mentions neither counts once, for the oldest goal.
 export function habitMatches(t, r) {
   if (t.type !== 'expense') return false;
-  if (r.category && r.category !== 'Other' && t.category === r.category) return true;
-  if (!r.words.length) return false;
-  const hay = `${t.title} ${t.notes || ''}`.toLowerCase();
-  return r.words.some((w) => hay.includes(w));
+  if (mentions(t, r.words)) return true;
+  if (!r.category || r.category === 'Other' || t.category !== r.category) return false;
+  const siblings = RULES.filter((o) => o.id !== r.id && o.category === r.category);
+  if (!siblings.length) return true;
+  if (siblings.some((o) => mentions(t, o.words))) return false;
+  return !siblings.some((o) => o.start < r.start || (+o.start === +r.start && String(o.id) < String(r.id)));
 }
 
 export const isPlanned = (t) => RULES.some((r) => habitMatches(t, r));
