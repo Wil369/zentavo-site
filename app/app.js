@@ -1,5 +1,5 @@
 import { CONFIG } from './config.js';
-import { cloudConfigured, connect, fetchAll, mapRecords, sampleData } from './data.js';
+import { cloudConfigured, connect, describeError, fetchAll, mapRecords, sampleData } from './data.js';
 import * as M from './money.js';
 
 const root = document.getElementById('root');
@@ -71,13 +71,31 @@ async function boot() {
     return;
   }
   renderGate();
+  let container;
   try {
-    const container = await connect({ onSignedOut: () => { state.data = null; renderGate(); } });
-    state.container = container;
+    container = await connect({
+      onSignedOut: () => { state.data = null; location.reload(); },
+      onError: (e) => setGateError(e),
+    });
+  } catch (err) {
+    setGateError(describeError(err, 'setup'));
+    return;
+  }
+  state.container = container;
+  try {
     await loadFromCloud();
   } catch (err) {
-    renderGate(err.message || String(err));
+    renderGate();
+    setGateError(describeError(err, 'load'), true);
   }
+}
+
+function setGateError(e, withRetry = false) {
+  const el = document.getElementById('gate-error');
+  if (!el) return;
+  el.hidden = false;
+  el.innerHTML = `${esc(e.text)}${e.code ? `<span class="error-code">${esc(e.code)}</span>` : ''}${withRetry ? ' <button class="link" id="gate-retry">Try again</button>' : ''}`;
+  document.getElementById('gate-retry')?.addEventListener('click', () => location.reload());
 }
 
 async function loadFromCloud() {
@@ -104,7 +122,7 @@ function renderGate(error) {
       </div>
       <div id="apple-sign-in-button"></div>
       <div id="apple-sign-out-button" hidden></div>
-      ${error ? `<p class="error">${esc(error)}</p>` : ''}
+      <p class="error" id="gate-error" role="alert" ${error ? '' : 'hidden'}>${esc(error || '')}</p>
       <p class="small muted" style="margin-top:18px">Just looking? <a href="?sample">See it with sample data</a></p>
     </div></div>`;
 }

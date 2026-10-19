@@ -17,8 +17,50 @@ function loadScript(src) {
 
 export const cloudConfigured = () => !!CONFIG.apiToken;
 
-/** Sets up Sign in with Apple. Resolves with the container once a user is signed in. */
-export async function connect({ onSignedOut }) {
+let guardInstalled = false;
+/**
+ * CloudKit JS takes the first object-shaped window message after the sign-in popup opens as
+ * Apple's answer, without checking who sent it. Browser extensions (password managers,
+ * assistants) post messages too, so sign-in failed with UNKNOWN_ERROR in a normal window but
+ * worked in a private one. Only Apple's reply (it carries ckSession or errorMessage) gets through.
+ */
+function guardSignInMessages() {
+  if (guardInstalled) return;
+  guardInstalled = true;
+  window.addEventListener('message', (e) => {
+    const d = e.data;
+    if (d && typeof d === 'object' && !Array.isArray(d) && !('ckSession' in d) && !('errorMessage' in d)) {
+      e.stopImmediatePropagation();
+    }
+  }, true);
+}
+
+/** Plain words for what went wrong, plus the code for us. */
+export function describeError(err, phase) {
+  const code = err?.ckErrorCode || err?.serverErrorCode || '';
+  const reason = err?.reason || err?.message || String(err || '');
+  console.error(`[Zentavo] ${phase} failed`, code, reason, err);
+  if (phase === 'sign-in') {
+    return { text: 'Sign-in didn\'t finish. Please try again. If it keeps happening, try a private window: some browser extensions get in the way of Apple\'s sign-in window.', code };
+  }
+  if (code === 'ZONE_NOT_FOUND') {
+    return { text: 'No Zentavo data in this iCloud yet. Open Zentavo on your iPhone with the same Apple ID, then refresh.', code };
+  }
+  if (code === 'AUTHENTICATION_REQUIRED' || code === 'AUTHENTICATION_FAILED') {
+    return { text: 'Apple asked to sign in again. Please sign in once more.', code };
+  }
+  if (code === 'ACCESS_DENIED' || code === 'PERMISSION_FAILURE') {
+    return { text: 'Apple didn\'t allow web access to this iCloud data. On your iPhone: Settings → your name → iCloud → turn on “Access iCloud Data on the Web”, then try again.', code };
+  }
+  return { text: `Couldn't load your data from iCloud. ${reason}`, code };
+}
+
+/**
+ * Sets up Sign in with Apple. Resolves with the container once a user is signed in. A failed
+ * attempt calls onError and keeps waiting: CloudKit shows the sign-in button again.
+ */
+export async function connect({ onSignedOut, onError }) {
+  guardSignInMessages();
   await loadScript(CK_SCRIPT);
   window.CloudKit.configure({
     locale: 'en-us',
@@ -34,12 +76,14 @@ export async function connect({ onSignedOut }) {
     }],
   });
   const container = window.CloudKit.getDefaultContainer();
-  const user = await container.setUpAuth();
-  if (user) {
-    container.whenUserSignsOut().then(() => onSignedOut?.());
-    return container;
+  let user = await container.setUpAuth();
+  while (!user) {
+    try {
+      user = await container.whenUserSignsIn();
+    } catch (err) {
+      onError?.(describeError(err, 'sign-in'));
+    }
   }
-  await container.whenUserSignsIn();
   container.whenUserSignsOut().then(() => onSignedOut?.());
   return container;
 }
@@ -57,8 +101,7 @@ export async function fetchAll(container, onProgress) {
     if (syncToken) request.syncToken = syncToken;
     const response = await db.fetchRecordZoneChanges([request]);
     if (response.hasErrors) {
-      const err = response.errors[0];
-      throw new Error(err?.reason || err?.serverErrorCode || 'iCloud refused the request.');
+      throw response.errors[0] || new Error('iCloud refused the request.');
     }
     const zone = response.zones[0];
     for (const r of zone.records || []) if (!r.deleted) records.push(r);
