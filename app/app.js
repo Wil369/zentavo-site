@@ -1,6 +1,6 @@
-import { CONFIG } from './config.js?v=20261019m';
-import { cloudConfigured, connect, describeError, fetchAll, mapRecords, sampleData } from './data.js?v=20261019m';
-import * as M from './money.js?v=20261019m';
+import { CONFIG } from './config.js?v=20261019n';
+import { cloudConfigured, connect, describeError, fetchAll, mapRecords, sampleData } from './data.js?v=20261019n';
+import * as M from './money.js?v=20261019n';
 
 const root = document.getElementById('root');
 const tipEl = document.getElementById('tip');
@@ -211,6 +211,7 @@ function viewOverview(el, d) {
         <div class="kpi-val ${status === 'over' ? 'status-bad' : status === 'close' ? 'status-warn' : ''}">${M.money(spentToday)}</div>
         <div class="kpi-sub">${limit.amount > 0 ? `of ${M.money0(limit.amount)} daily limit · <b class="${status === 'over' ? 'status-bad' : 'status-good'}">${spentToday > limit.amount ? `${M.money(spentToday - limit.amount)} over` : `${M.money(limit.amount - spentToday)} left`}</b>` : 'No daily limit set'}</div>
         ${limit.amount > 0 ? `<div class="bar ${status === 'over' ? 'rose' : status === 'close' ? 'amber' : ''}"><span style="width:${pct(spentToday, limit.amount)}%"></span></div>` : ''}
+        ${limit.amount > 0 ? weekLine(M.weekBudget(d, now), spentToday, limit.amount) : ''}
       </div>
       <div class="card">
         <h2>Next payday</h2>
@@ -230,6 +231,7 @@ function viewOverview(el, d) {
       ${upcomingStrip(d, p, today)}
     </section>
 
+    ${M.limitMode(d.settings) === 'paychecks' ? planSplit(M.moneyPlan(d, now)) : ''}
     ${overviewGoals(d, now)}
 
     <section class="grid two">
@@ -650,6 +652,18 @@ function viewPlan(el, d) {
         <p class="small muted" style="margin-top:14px">Take-home is what lands in your account, after taxes, 401(k) and insurance. Paychecks still to come are estimated from your recent ones.${pl.paceDays && pl.paceDays < 14 ? ` Your everyday pace is based on ${pl.paceDays} days of spending, so it firms up as you log more.` : ''}</p>
       </div>
     </section>`;
+}
+
+// This week against seven days of the limit: a bigger day is fine when the week can take it.
+function weekLine(w, spentToday, dayLimit) {
+  if (!(w.limit > 0)) return '';
+  const st = M.dayStatus(w.spent, w.limit);
+  const hint = w.left < 0 ? 'Over for the week. Lighter days from here bring it back.'
+    : spentToday > dayLimit ? (w.daysLeft > 1 ? `Over today, but the week can take it: about ${M.money0(Math.floor(w.perDayAfterToday))} a day for the rest of the week.` : 'Over today, but the week still ends on budget.')
+    : w.daysLeft > 1 ? `Leaves about ${M.money0(Math.floor(w.perDayAfterToday))} a day for the other ${w.daysLeft - 1} day${w.daysLeft === 2 ? '' : 's'}.` : 'Last day of the week.';
+  return `<div class="kpi-sub" style="margin-top:6px"><b>This week</b> ${M.money(w.spent)} of ${M.money0(w.limit)} · <b class="${w.left < 0 ? 'status-bad' : 'status-good'}">${w.left < 0 ? `${M.money(-w.left)} over` : `${M.money(w.left)} left`}</b></div>
+    <div class="bar ${st === 'over' ? 'rose' : st === 'close' ? 'amber' : ''}" style="margin:8px 0 6px"><span style="width:${pct(w.spent, w.limit)}%"></span></div>
+    <div class="small muted">${hint}</div>`;
 }
 
 // The spending-plan split: fixed costs, investments, savings and guilt-free spending as shares of take-home.

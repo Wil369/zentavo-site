@@ -437,6 +437,29 @@ export function dailyLimit(data, month = new Date(), now = new Date()) {
     explanation: `${waiting}Your ${money0(base)} ${budget > 0 ? 'budget' : 'income'}, minus ${money0(bills)} in bills, over ${days} days.` };
 }
 
+// This week against seven days of the daily limit (weeks start Sunday, like the iPhone), so a
+// bigger day can be balanced by smaller ones.
+export function weekBudget(data, now = new Date()) {
+  const today = startOfDay(now);
+  const start = addDays(today, -today.getDay());
+  const limits = new Map(), spentMaps = new Map();
+  let limit = 0, spent = 0, before = 0;
+  for (let i = 0; i < 7; i++) {
+    const day = addDays(start, i);
+    const key = `${day.getFullYear()}-${day.getMonth()}`;
+    if (!limits.has(key)) limits.set(key, dailyLimit(data, day, now).amount);
+    limit += limits.get(key);
+    if (day > today) continue;
+    if (!spentMaps.has(key)) spentMaps.set(key, spentByDay(data.transactions, day));
+    const v = spentMaps.get(key).get(day.getTime()) || 0;
+    spent += v;
+    if (day < today) before += v;
+  }
+  const daysLeft = 7 - today.getDay();
+  const left = limit - spent;
+  return { start, limit, spent, before, daysLeft, left, perDayAfterToday: daysLeft > 1 ? Math.max(left, 0) / (daysLeft - 1) : 0 };
+}
+
 export function spentByDay(transactions, month) {
   const totals = new Map();
   for (const t of transactions) {
