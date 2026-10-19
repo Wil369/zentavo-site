@@ -525,16 +525,24 @@ export function moneyPlan(data, now = new Date()) {
     perDay = sum(everyday.filter((t) => t.date >= windowStart)) / Math.max(paceDays, 1);
   }
   const daysLeft = daysInMonth(now) - now.getDate();
+  // Everyday budgets: category limits or spending budgets entered as repeats, whichever is higher.
+  const EVERYDAY_CATS = new Set(['Food & Groceries', 'Transportation', 'Shopping', 'Entertainment', 'Personal Care', 'Healthcare', 'Education', 'Other']);
+  const budgetsBy = new Map();
+  for (const b of data.budgets || []) if (EVERYDAY_CATS.has(b.category) && b.limit > 0) budgetsBy.set(b.category, Math.max(budgetsBy.get(b.category) || 0, b.limit));
+  for (const l of billLines(data, now)) if (l.budgetLike && EVERYDAY_CATS.has(l.category)) budgetsBy.set(l.category, Math.max(budgetsBy.get(l.category) || 0, l.total));
+  const everydayBudgets = [...budgetsBy].map(([category, amount]) => ({ category, amount })).sort((a, b) => b.amount - a.amount);
+  const everydayBudgetTotal = everydayBudgets.reduce((s, b) => s + b.amount, 0);
   const total = (arr) => arr.reduce((s, l) => s + l.total, 0);
   const billsTotal = total(bills), goalsTotal = total(goals), investTarget = total(investGoals);
   const free = takeHome - billsTotal - goalsTotal;
-  const projectedEveryday = everydaySpent + perDay * daysLeft;
+  const paceEveryday = everydaySpent + perDay * daysLeft;
+  const projectedEveryday = Math.max(paceEveryday, everydayBudgetTotal);
   const canInvest = Math.max(free - projectedEveryday - saved, 0);
   return {
     takeHome, landed, paydayCount, landedCount, fromPaychecks, bills: bills.sort((a, b) => b.total - a.total), goals, investGoals,
-    everydaySpent, perDay, paceDays, daysLeft, invested, saved, billsTotal, goalsTotal, investTarget, free, projectedEveryday,
+    everydaySpent, perDay, paceDays, daysLeft, everydayBudgets, everydayBudgetTotal, usesBudgets: everydayBudgetTotal > paceEveryday, invested, saved, billsTotal, goalsTotal, investTarget, free, projectedEveryday,
     canInvest, leftToInvest: Math.max(canInvest - invested, 0), leftThisMonth: free - everydaySpent - invested - saved,
     used: billsTotal + goalsTotal + everydaySpent + invested + saved,
-    suggestedInvest: Math.floor(canInvest / 50) * 50,
+    suggestedInvest: Math.floor((canInvest * 0.85) / 50) * 50,
   };
 }
