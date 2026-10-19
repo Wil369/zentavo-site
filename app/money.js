@@ -156,8 +156,10 @@ export function billLines(data, month) {
         line.note = `Covered by your “${g.name}” goal, so it isn't counted twice.`;
       }
     }
-    lines.push({ title: g.name, total: habitSetAside(g, month), times: 1, counted: true, category: g.category, habit: true, habitKind: g.kind,
-      kind: `${HABIT_KIND[g.kind] || 'Weekly'} goal · ${money0(g.targetAmount)} a ${r.weekly ? 'week' : 'month'}` });
+    const setAside = habitSetAside(g, month, data.transactions);
+    const extra = setAside - habitPlain(g, month);
+    lines.push({ title: g.name, total: setAside, times: 1, counted: true, category: g.category, habit: true, habitKind: g.kind,
+      kind: `${HABIT_KIND[g.kind] || 'Weekly'} goal · ${money0(g.targetAmount)} a ${r.weekly ? 'week' : 'month'}${extra >= 1 ? ` · ${money0(extra)} more sent than the goal` : ''}` });
   }
   for (const debt of data.debts) {
     if (debt.remainingBalance <= 0) continue;
@@ -518,9 +520,26 @@ export function habitProgress(g, transactions, now = new Date()) {
     matches: transactions.filter((t) => habitMatches(t, r)).sort((a, b) => b.date - a.date) };
 }
 
-export function habitSetAside(g, month) {
-  return g.period === 'month' ? g.targetAmount : (g.targetAmount * daysInMonth(month)) / 7;
+// What a goal takes out of a month: its amount every week (or once a month), or what was really sent
+// when that's more ($140 to Mom & Dad against $50 a week). Weeks still to come count at the goal's
+// amount; a week split across two months counts for its days in this one.
+export function habitSetAside(g, month, transactions = [], now = new Date()) {
+  const r = habitRule(g);
+  const from = monthStart(month), to = monthEnd(month);
+  const sent = (a, b) => transactions.filter((t) => t.date >= a && t.date < b && habitMatches(t, r)).reduce((s, t) => s + t.amount, 0);
+  if (!r.weekly) return from <= now ? Math.max(g.targetAmount, sent(from, to)) : g.targetAmount;
+  let total = 0, cursor = from;
+  for (let i = 0; i < 8 && cursor < to; i++) {
+    const week = habitPeriod(true, cursor);
+    const a = week.start > from ? week.start : from, b = week.end < to ? week.end : to;
+    const share = (g.targetAmount * dayDiff(a, b)) / 7;
+    total += a <= now ? Math.max(share, sent(a, b)) : share;
+    if (b <= cursor) break;
+    cursor = b;
+  }
+  return total;
 }
+export const habitPlain = (g, month) => (g.period === 'month' ? g.targetAmount : (g.targetAmount * daysInMonth(month)) / 7);
 
 // ---------- net worth ----------
 export function netWorth(data) {
