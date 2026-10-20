@@ -1,6 +1,6 @@
 // Loads the person's Zentavo data from their private iCloud (CloudKit JS), or sample data.
-import { CONFIG } from './config.js?v=20261019n';
-import { addDays, addMonths, monthStart, startOfDay } from './money.js?v=20261019n';
+import { CONFIG } from './config.js?v=20261020a';
+import { addDays, addMonths, monthStart, startOfDay } from './money.js?v=20261020a';
 
 const CK_SCRIPT = 'https://cdn.apple-cloudkit.com/ck/2/cloudkit.js';
 
@@ -202,11 +202,20 @@ export function mapRecords(records) {
     updatedAt: date(r, 'updatedAt') || new Date(0),
   }));
 
+  const incomeSources = of('IncomeSource').map((r) => ({
+    name: str(r, 'name').trim(), employer: str(r, 'employer').trim(), isHourly: bool(r, 'isHourly'),
+    hourlyRate: numOpt(r, 'hourlyRate'), estimatedWeeklyHours: numOpt(r, 'estimatedWeeklyHours'),
+    payFrequency: enumVal(r, 'payFrequency', ['Weekly', 'Biweekly', 'Monthly']), taxWithholdingPercent: numOpt(r, 'taxWithholdingPercent'),
+    salaryAmount: numOpt(r, 'salaryAmount'), salaryBasis: enumVal(r, 'salaryBasis', ['Annual', 'Monthly']),
+    taxForm: str(r, 'taxForm'), retirementPlan: str(r, 'retirementPlan'), retirementPercent: numOpt(r, 'retirementPercent'),
+    employerMatchPercent: numOpt(r, 'employerMatchPercent'), hsaPerPaycheck: numOpt(r, 'hsaPerPaycheck'),
+  }));
+
   const snapshots = of('NetWorthSnapshot').map((r) => ({
     day: date(r, 'day') || new Date(0), assets: num(r, 'assets'), liabilities: num(r, 'liabilities'),
   }));
 
-  return { transactions, settings: settingsList[0] || null, debts, goals, budgets, habitGoals, assets, snapshots, counts, source: 'icloud' };
+  return { transactions, settings: settingsList[0] || null, debts, goals, budgets, habitGoals, assets, snapshots, incomeSources, counts, source: 'icloud' };
 }
 
 // ---------- sample data (for visitors, and before iCloud is connected) ----------
@@ -311,6 +320,14 @@ export function sampleData(now = new Date()) {
       { name: '2016 Toyota Corolla', kind: 'Vehicles', value: 8500, updatedAt: ago(60) },
     ],
     snapshots,
+    incomeSources: [
+      { name: 'Program assistant', employer: 'City library', isHourly: true, hourlyRate: 24, estimatedWeeklyHours: 32, payFrequency: 'Biweekly',
+        taxWithholdingPercent: 18, salaryAmount: null, salaryBasis: null, taxForm: '', retirementPlan: '403(b)', retirementPercent: 5,
+        employerMatchPercent: 3, hsaPerPaycheck: null },
+      { name: 'Barista', employer: 'Corner Coffee', isHourly: true, hourlyRate: 17, estimatedWeeklyHours: 22, payFrequency: 'Biweekly',
+        taxWithholdingPercent: 12, salaryAmount: null, salaryBasis: null, taxForm: '', retirementPlan: '', retirementPercent: null,
+        employerMatchPercent: null, hsaPerPaycheck: null },
+    ],
     budgets: [],
     counts: {},
     source: 'sample',

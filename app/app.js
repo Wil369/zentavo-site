@@ -1,6 +1,6 @@
-import { CONFIG } from './config.js?v=20261019n';
-import { cloudConfigured, connect, describeError, fetchAll, mapRecords, sampleData } from './data.js?v=20261019n';
-import * as M from './money.js?v=20261019n';
+import { CONFIG } from './config.js?v=20261020a';
+import { cloudConfigured, connect, describeError, fetchAll, mapRecords, sampleData } from './data.js?v=20261020a';
+import * as M from './money.js?v=20261020a';
 
 const root = document.getElementById('root');
 const tipEl = document.getElementById('tip');
@@ -37,6 +37,15 @@ const ICON = {
   networth: '<path d="M3 17l6-6 4 4 8-8"/><path d="M15 7h6v6"/>',
   card: '<rect x="3" y="6" width="18" height="13" rx="2.5"/><path d="M3 10.5h18M7 15h4"/>',
   plan: '<path d="M12 3v9h9"/><path d="M20.5 15.5A9 9 0 1 1 8.5 3.7"/>',
+  spending: '<rect x="3" y="4" width="18" height="16" rx="3"/><path d="M7 9h10M7 13h6M7 17h8"/>',
+  briefcase: '<rect x="3" y="7" width="18" height="13" rx="2.5"/><path d="M9 7V5h6v2M3 12h18"/>',
+  doc: '<path d="M7 3h7l4 4v14H7z"/><path d="M14 3v4h4M10 12h5M10 16h5"/>',
+  bank: '<path d="M3 9l9-5 9 5M5 10v8M9.5 10v8M14.5 10v8M19 10v8M3 20h18"/>',
+  gift: '<rect x="4" y="9" width="16" height="11" rx="1.5"/><path d="M3 9h18M12 9v11M12 9c-2-4-6-4-6-1.5S10 9 12 9zm0 0c2-4 6-4 6-1.5S14 9 12 9z"/>',
+  plane: '<path d="M10 14l-6-2 1-2 7 1 4-6h2l-2 7 5 2-1 2-6-1-3 5h-2z"/>',
+  umbrella: '<path d="M3 12a9 9 0 0 1 18 0zM12 12v6a2 2 0 0 0 4 0"/>',
+  fork: '<path d="M7 3v8a2 2 0 0 0 4 0V3M9 11v10M16 3c-2 1-3 4-3 7h3v11"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
   family: '<circle cx="8" cy="7" r="2.6"/><circle cx="16" cy="7" r="2.6"/><path d="M3.5 20v-4.5A3.5 3.5 0 0 1 7 12h2a3.5 3.5 0 0 1 3.5 3.5V20M11.5 20v-4.5A3.5 3.5 0 0 1 15 12h2a3.5 3.5 0 0 1 3.5 3.5V20"/>',
   flame: '<path d="M12 21c-3.9 0-6.5-2.6-6.5-6.2 0-3.3 2.4-5.4 3.9-7.6.4 1.6 1.2 2.7 2.4 3.3C12 7.4 13.4 5 15.6 3c.2 3 3 5.4 3 10.1 0 4.6-2.8 7.9-6.6 7.9z"/>',
   coin: '<circle cx="12" cy="12" r="8"/><path d="M12 8v8M9.5 10h4a1.5 1.5 0 0 1 0 3h-3a1.5 1.5 0 0 0 0 3h4"/>',
@@ -135,7 +144,7 @@ function brandMark() {
 
 // ---------- shell ----------
 const VIEWS = [
-  ['overview', 'Overview'], ['plan', 'Money plan'], ['transactions', 'Transactions'], ['bills', 'Bills & splits'], ['paychecks', 'Paychecks'], ['goals', 'Goals'], ['networth', 'Net worth'],
+  ['overview', 'Overview'], ['spending', 'Spending plan'], ['plan', 'Money plan'], ['transactions', 'Transactions'], ['bills', 'Bills & splits'], ['paychecks', 'Paychecks'], ['goals', 'Goals'], ['networth', 'Net worth'],
 ];
 
 function render() {
@@ -176,7 +185,8 @@ function render() {
   }));
   document.getElementById('refresh')?.addEventListener('click', () => loadFromCloud().catch((e) => alertBanner(e.message)));
   const view = document.getElementById('view');
-  ({ overview: viewOverview, transactions: viewTransactions, bills: viewBills, paychecks: viewPaychecks, goals: viewGoals, networth: viewNetWorth, plan: viewPlan })[state.view](view, d);
+  ({ overview: viewOverview, transactions: viewTransactions, bills: viewBills, paychecks: viewPaychecks, goals: viewGoals, networth: viewNetWorth, plan: viewPlan, spending: viewSpending })[state.view](view, d);
+  view.querySelectorAll('[data-goto]').forEach((b) => b.addEventListener('click', () => { state.view = b.dataset.goto; history.replaceState(null, '', `#${state.view}`); render(); window.scrollTo(0, 0); }));
 }
 
 function alertBanner(message) {
@@ -683,19 +693,205 @@ function planSplit(pl) {
   const scale = total > 1 ? 1 / total : 1;
   const detail = (b) => {
     if (b.key === 'fixed') return [`Bills ${M.money0(pl.billsTotal)}`, ...(pl.goals.length ? [`${pl.goals.map((g) => esc(g.title)).join(' &amp; ')} ${M.money0(pl.goalsTotal)}`] : []), `Everyday needs ${M.money0(pl.essentialEveryday)}`].join(' · ');
-    if (b.key === 'investments') return pl.invested > 0 ? `Invested so far ${M.money0(pl.invested)}${pl.investTarget > pl.invested ? ` · goal ${M.money0(pl.investTarget)}` : ''}` : pl.investTarget > 0 ? `Investing goal ${M.money0(pl.investTarget)}` : 'Nothing invested yet this month';
+    if (b.key === 'investments') return (pl.invested > 0 ? `Invested so far ${M.money0(pl.invested)}${pl.investTarget > pl.invested ? ` · goal ${M.money0(pl.investTarget)}` : ''}` : pl.investTarget > 0 ? `Investing goal ${M.money0(pl.investTarget)}` : 'Nothing invested yet this month') + (pl.payrollInvesting > 0 ? ` · from paychecks ${M.money0(pl.payrollInvesting)}` : '');
     if (b.key === 'savings') return pl.savingsPlanned > 0 ? `Moves to savings ${M.money0(pl.savingsPlanned)}` : pl.saved > 0 ? 'Moved to savings this month' : 'Nothing saved yet this month';
     return `Left for dining out, fun and shopping · ${M.money0(pl.guiltFreeSpent)} spent so far`;
   };
-  return `<section class="card split-card"><h2>How your pay splits</h2>
+  return `<section class="card split-card"><h2>How your pay splits <button class="link" data-goto="spending">Spending plan</button></h2>
     <div class="split-bar">${pl.split.map((b, i) => (pos[i] > 0.001 ? `<span style="width:${(pos[i] * scale * 100).toFixed(2)}%;background:${SPLIT_COLOR[b.key]}" data-tip="${esc(b.label)}: ${Math.round(b.share * 100)}%"></span>` : '')).join('')}</div>
     <div class="split-rows">${pl.split.map((b) => { const [st, cls] = splitStatus(b); return `<div class="split-row">
       <span class="dot" style="background:${SPLIT_COLOR[b.key]}"></span>
       <div class="grow"><div class="t">${b.label}<span class="amt">${M.money0(b.amount)} · ${Math.round(b.share * 100)}%</span></div>
         <div class="s">${detail(b)}</div>
         <div class="s"><span class="${cls}">Target ${b.target} · ${st}</span></div></div></div>`; }).join('')}</div>
-    <p class="small muted" style="margin-top:12px">Targets from a popular spending plan: fixed costs 50–60% of take-home, investments about 10%, savings 5–10% and guilt-free spending 25–30%. A guide, not a rule. Money your employer takes for a 401(k) or HSA isn't in take-home, so it isn't counted here.</p>
+    <p class="small muted" style="margin-top:12px">Targets from a popular spending plan: fixed costs 50–60% of take-home, investments about 10%, savings 5–10% and guilt-free spending 25–30%. A guide, not a rule. ${pl.payrollInvesting > 0 ? `Out of ${M.money0(pl.planBase)}: take-home plus the ${M.money0(pl.payrollInvesting)} invested from your paychecks before they land.` : 'Money taken from your paychecks for a 401(k) or HSA counts once it\'s added to your job on the iPhone.'}</p>
   </section>`;
+}
+
+// ---------- spending plan ----------
+// The month the way a spending plan reads it: net worth, income (gross and net, W-2 and 1099), then
+// fixed costs, investments, saving goals and guilt-free spending against their targets (same as the iPhone).
+const pctText = (s) => (s > 0 && s < 0.1 ? `${(s * 100).toFixed(1)}%` : `${Math.round(s * 100)}%`);
+const GOAL_KINDS = [
+  { key: 'emergency', title: 'Emergency fund', icon: 'umbrella', words: ['emergency', 'rainy day', 'cushion', 'safety'] },
+  { key: 'vacation', title: 'Vacation & travel', icon: 'plane', words: ['vacation', 'travel', 'trip', 'getaway'] },
+  { key: 'gifts', title: 'Gifts', icon: 'gift', words: ['gift', 'christmas', 'birthday', 'holiday'] },
+];
+const goalKind = (g) => GOAL_KINDS.find((k) => k.words.some((w) => g.name.toLowerCase().includes(w)));
+const BAND = { fixed: [0.5, 0.6], investments: [0.1, 0.15], savings: [0.05, 0.1], guiltFree: [0.25, 0.3] };
+
+function planRow(icon, title, detail, amount, share, cls = '') {
+  return `<div class="row">
+    <span class="ic">${svg(icon)}</span>
+    <div class="grow"><div class="t">${esc(title)}</div>${detail ? `<div class="s">${detail}</div>` : ''}</div>
+    ${amount == null ? '' : `<span class="amt ${cls}">${M.money(amount)}${share > 0.0005 ? `<small>${pctText(share)}</small>` : ''}</span>`}
+  </div>`;
+}
+
+function bucketHead(n, b) {
+  const [st, cls] = splitStatus(b);
+  const [lo, hi] = BAND[b.key];
+  const fill = Math.max(0, Math.min(1, b.share));
+  return `<h2>${n} · ${b.key === 'savings' ? 'Saving goals' : b.label}<span class="head-amt">${M.money0(b.amount)} · ${pctText(b.share)}</span></h2>
+    <div class="target-bar" data-tip="${esc(b.label)}: ${pctText(b.share)} of take-home · target ${b.target}">
+      <span class="fill" style="width:${Math.max(fill * 100, 1)}%;background:${SPLIT_COLOR[b.key]}"></span>
+      <span class="band" style="left:${lo * 100}%;width:${(hi - lo) * 100}%"></span>
+    </div>
+    <div class="small ${cls}" style="margin-bottom:6px">Target ${b.target} · ${st}</div>`;
+}
+
+function viewSpending(el, d) {
+  const now = new Date();
+  const pl = M.moneyPlan(d, now);
+  const monthName = now.toLocaleDateString('en-US', { month: 'long' });
+  const share = (v) => (pl.planBase > 0 ? v / pl.planBase : 0);
+  const bucket = (k) => pl.split.find((b) => b.key === k);
+  const sources = d.incomeSources || [];
+  const w2 = sources.filter((s) => !M.isContractor(s));
+  const place = (s) => esc(s.employer || s.name);
+  const templateOf = (l) => (l.templateID ? d.transactions.find((t) => t.id === l.templateID) : null);
+
+  // 1. Net worth
+  const nw = M.netWorth(d);
+  const hasAssets = (d.assets || []).length > 0;
+  const openDebts = (d.debts || []).filter((x) => x.remainingBalance > 0.005);
+  const netWorthCard = `<div class="card"><h2>1 · Net worth${hasAssets ? `<span class="head-amt">${M.money0(nw.net)}</span>` : ''}<button class="link" data-goto="networth">Details</button></h2>
+    <div class="rows wrap">
+      ${hasAssets ? planRow('bank', 'What you own', `${d.assets.length} account${d.assets.length === 1 ? '' : 's'} and things`, nw.assets)
+        : planRow('plus', 'Add what you own', 'Checking, savings, your Roth IRA, a brokerage, a car. Add them on your iPhone (Home → Net worth); minus what you owe, that\'s your net worth.', null)}
+      ${planRow('card', 'What you owe', openDebts.length ? `${openDebts.length} debt${openDebts.length === 1 ? '' : 's'} left` : (d.debts || []).length ? `All ${d.debts.length} debt${d.debts.length === 1 ? '' : 's'} paid off` : 'No debts added', nw.liabilities)}
+      ${hasAssets ? `<div class="row subtotal hi"><div class="grow"><div class="t">Net worth</div></div><span class="amt">${M.money(nw.net)}</span></div>` : ''}
+    </div></div>`;
+
+  // 2. Income
+  const rate1099 = (sources.find((s) => M.isContractor(s) && s.taxWithholdingPercent > 0)?.taxWithholdingPercent ?? 25) / 100;
+  const netW2 = Math.max(pl.takeHome - pl.contractorPay, 0);
+  const coming = pl.paydayCount - pl.landedCount;
+  const payDetail = pl.fromPaychecks ? `After taxes: ${pl.paydayCount} paychecks this month${coming > 0 ? `, ${pl.landedCount} in, ${coming} coming` : ', all in'}` : 'This month\'s income';
+  const jobDetail = (s) => {
+    const parts = [M.isContractor(s) ? '1099' : 'W-2'];
+    if (s.isHourly && s.hourlyRate) parts.push(`${M.money(s.hourlyRate)}/hr${s.estimatedWeeklyHours ? ` × ${s.estimatedWeeklyHours} hrs` : ''}`);
+    const g = M.grossMonthly(s);
+    if (g) parts.push(`about ${M.money0(g)} a month gross`);
+    if (s.retirementPercent > 0) parts.push(`${esc(M.retirementName(s))} ${s.retirementPercent}%`);
+    return parts.join(' · ');
+  };
+  const incomeCard = `<div class="card"><h2>2 · Income</h2>
+    <div class="rows wrap">
+      ${planRow('briefcase', 'Gross W-2 pay', pl.grossW2 ? `A typical month before taxes, from your ${w2.length === 1 ? 'job' : `${w2.length} jobs`}` : 'Before taxes. Add your job on your iPhone (Spending plan → Income) to see it', pl.grossW2)}
+      ${planRow('coin', 'Net W-2 pay', payDetail, netW2, 0, 'in')}
+      ${planRow('doc', 'Gross 1099 pay', pl.contractorPay > 0 ? 'Freelance and side-gig pay this month, nothing withheld' : 'Freelance or side-gig pay, logged as Freelance or Side Hustle income', pl.contractorPay)}
+      ${planRow('doc', 'Net 1099 pay', `After setting aside ${Math.round(rate1099 * 100)}% for taxes`, pl.contractorPay * (1 - rate1099))}
+      <div class="row subtotal hi"><div class="grow"><div class="t">Net monthly take-home</div></div><span class="amt">${M.money(pl.takeHome)}</span></div>
+    </div>
+    ${pl.grossEstimate && pl.typicalTakeHome && pl.grossEstimate > pl.typicalTakeHome ? `<p class="small muted" style="margin-top:10px">In a typical month you take home about ${M.money0(pl.typicalTakeHome)}, ${Math.round((pl.typicalTakeHome / pl.grossEstimate) * 100)}% of the ${M.money0(pl.grossEstimate)} gross your jobs estimate. Taxes, retirement and insurance take the rest.</p>` : ''}
+    ${pl.contractorPay > 0 ? `<p class="small status-warn" style="margin-top:8px">Take-home counts 1099 pay in full. About ${M.money0(pl.contractorPay * rate1099)} of it is for taxes, so keep that aside.</p>` : ''}
+    ${sources.length ? `<div class="rows wrap jobs">${sources.map((s) => planRow(M.isContractor(s) ? 'doc' : 'briefcase', s.employer || s.name, jobDetail(s), null)).join('')}</div>` : ''}
+  </div>`;
+
+  // 3. Fixed costs
+  const fixedRows = [
+    ...pl.bills.map((l) => planRow(catIcon(templateOf(l)?.category || l.category), l.title,
+      l.billsAccount ? esc(l.kind) : l.fullTotal ? `Your ${M.sharePhrase(l.share)} of ${M.money(l.fullTotal)}` : l.kind === 'Debt payment' ? 'Debt minimum' : l.times > 1 ? `${l.times} times this month` : 'Monthly', l.total, share(l.total))),
+    ...pl.goals.map((l) => planRow('family', l.title, esc(l.kind), l.total, share(l.total))),
+    ...pl.essentialLines.map((l) => planRow(catIcon(l.category), l.name, `${M.money0(l.spent)} spent so far of ${M.money0(l.amount)} planned`, l.amount, share(l.amount))),
+  ];
+  const billText = pl.bills.map((l) => `${l.title} ${templateOf(l)?.category || l.category || ''} ${templateOf(l)?.notes || ''}`).join(' ').toLowerCase();
+  const has = (words) => words.some((w) => billText.includes(w));
+  const needNames = new Set(pl.essentialLines.map((l) => l.name));
+  const missing = [
+    !has(['rent', 'mortgage', 'housing']) && 'rent',
+    !has(['electric', 'utilit', 'water', 'internet', 'wifi', 'wi-fi', 'power', 'energy', 'mge', 'xcel', 'spectrum', 'gas bill']) && 'utilities',
+    !has(['insurance', 'geico', 'progressive', 'state farm', 'allstate', 'lemonade', 'renters']) && 'insurance',
+    !has(['phone', 'mobile', 'verizon', 't-mobile', 'tmobile', 'at&t', 'cricket', 'visible', 'wireless']) && 'phone',
+    !needNames.has('Transportation') && !has(['transport', 'car payment', 'bus pass']) && 'transportation',
+    !needNames.has('Groceries') && !has(['grocer']) && 'groceries',
+    !has(['childcare', 'child care', 'daycare', 'day care', 'nanny', 'child support']) && 'childcare',
+  ].filter(Boolean);
+  const fixedCard = `<div class="card">${bucketHead(3, bucket('fixed'))}
+    <div class="rows wrap">${fixedRows.join('') || '<div class="empty-state">No fixed costs yet. Rent, bills and subscriptions added as repeating entries show up here.</div>'}</div>
+    ${missing.length ? `<p class="small muted" style="margin-top:10px">Not in your plan: ${missing.join(', ')}. If you pay any of these, add it as a repeating bill so it's counted.</p>` : ''}
+  </div>`;
+
+  // 4. Investments
+  const invRows = pl.investedLines.map((l) => planRow(l.name.includes('IRA') ? 'bank' : 'networth', l.name, `${l.count} deposit${l.count === 1 ? '' : 's'} this month`, l.amount, share(l.amount)));
+  if (pl.investTarget > pl.invested + 0.5) invRows.push(planRow('repeat', 'Still planned this month', 'From your investing goal or repeating transfer', pl.investTarget - pl.invested, share(pl.investTarget - pl.invested)));
+  if (!invRows.length) invRows.push(planRow('networth', 'Roth IRA, stocks', 'Nothing yet this month. Deposits logged under Investing show up here.', null));
+  for (const s of w2) {
+    const r = M.retirementMonthly(s), h = M.hsaMonthly(s), m = M.matchMonthly(s);
+    if (r) invRows.push(planRow('briefcase', `${M.retirementName(s)} · ${s.employer || s.name}`, `${s.retirementPercent}% of pay, taken out before it lands`, r, share(r)));
+    if (h) invRows.push(planRow('heart', `HSA · ${s.employer || s.name}`, `${M.money(s.hsaPerPaycheck)} a paycheck, before it lands`, h, share(h)));
+    if (m) invRows.push(planRow('gift', `Employer match · ${s.employer || s.name}`, `${s.employerMatchPercent}% on top. Free money, not counted in your %`, m, 0, 'in'));
+  }
+  if (!w2.some((s) => M.retirementMonthly(s) || M.hsaMonthly(s) || M.matchMonthly(s))) {
+    invRows.push(planRow('briefcase', '401(k), 403(b), match or HSA', w2.length ? 'Taken from paychecks before they land, so Zentavo can\'t see them. On your iPhone: Spending plan → tap your job → add them from your pay stub.' : 'Taken from paychecks before they land. Add your job on your iPhone first.', null));
+  }
+  const investCard = `<div class="card">${bucketHead(4, bucket('investments'))}
+    <div class="rows wrap">${invRows.join('')}</div>
+    ${pl.payrollInvesting > 0 && pl.grossW2 ? `<p class="small status-good" style="margin-top:10px">All in, about ${M.money0(bucket('investments').amount + pl.employerMatch)} a month goes to your future, ${Math.round(((bucket('investments').amount + pl.employerMatch) / pl.grossW2) * 100)}% of your gross pay.</p>` : ''}
+  </div>`;
+
+  // 5. Saving goals
+  const saveRows = pl.savingsMoves.map((l) => planRow('coin', l.title, `${l.times} move${l.times === 1 ? '' : 's'} this month`, l.total, share(l.total)));
+  if (!saveRows.length && pl.saved > 0) saveRows.push(planRow('coin', 'Moved to savings', 'This month', pl.saved, share(pl.saved)));
+  if (!saveRows.length) saveRows.push(planRow('coin', 'Nothing set aside yet', 'Move part of each paycheck to savings: on your iPhone, Money plan → Add a move.', null));
+  const goalRow = (g, icon) => {
+    const prog = g.targetAmount > 0 ? g.currentAmount / g.targetAmount : 0;
+    const perMonth = g.deadline && g.deadline > now && g.currentAmount < g.targetAmount
+      ? (g.targetAmount - g.currentAmount) / Math.max((g.deadline - now) / (30.44 * 86400000), 1) : null;
+    return `<div class="row"><span class="ic">${svg(icon)}</span><div class="grow"><div class="t">${esc(g.name)}</div>
+      <div class="bar" style="margin:6px 0 4px;height:6px"><span style="width:${pct(g.currentAmount, g.targetAmount)}%;background:var(--lav)"></span></div>
+      <div class="s">${M.money0(g.currentAmount)} of ${M.money0(g.targetAmount)} · ${Math.round(Math.min(prog, 1) * 100)}%${perMonth ? ` · ${M.money0(perMonth)} a month to make it` : ''}</div></div></div>`;
+  };
+  const goalsList = d.goals || [];
+  const kindRows = GOAL_KINDS.map((k) => {
+    const mine = goalsList.filter((g) => goalKind(g) === k);
+    return mine.length ? mine.map((g) => goalRow(g, k.icon)).join('') : planRow(k.icon, k.title, 'Not set up yet. Add it on your iPhone: Spending plan → Add.', null);
+  }).join('');
+  const debtsAll = d.debts || [];
+  const debtLeft = openDebts.reduce((s, x) => s + x.remainingBalance, 0);
+  const mins = openDebts.reduce((s, x) => s + (x.minimumPayment || 0), 0);
+  const debtRow = planRow(debtsAll.length && !openDebts.length ? 'check' : 'card', 'Debt payoff',
+    !debtsAll.length ? 'No debts added' : !openDebts.length ? `All ${debtsAll.length} debt${debtsAll.length === 1 ? '' : 's'} paid off`
+      : `${M.money0(debtLeft)} left on ${openDebts.length} debt${openDebts.length === 1 ? '' : 's'}${mins ? ` · ${M.money0(mins)} a month in minimums, counted in fixed costs` : ''}`, null);
+  const otherGoals = goalsList.filter((g) => !goalKind(g)).map((g) => goalRow(g, 'goals')).join('');
+  const savingsCard = `<div class="card">${bucketHead(5, bucket('savings'))}
+    <div class="rows wrap">${saveRows.join('')}</div>
+    <div class="sub-h">Your goals</div>
+    <div class="rows wrap">${kindRows}${debtRow}${otherGoals}</div>
+  </div>`;
+
+  // 6. Guilt-free
+  const gf = bucket('guiltFree');
+  const left = gf.amount - pl.guiltFreeSpent;
+  const daysLeft = M.daysInMonth(now) - now.getDate();
+  const wantIcon = { Dining: 'fork', Entertainment: 'star', Shopping: 'bag', 'Personal Care': 'heart' };
+  const wantRows = pl.guiltFreeLines.map((l) => planRow(wantIcon[l.category] || 'dot', l.name, `${l.count} purchase${l.count === 1 ? '' : 's'} this month`, l.amount, share(l.amount)));
+  const gfLine = gf.amount <= 0 ? 'Fixed costs, investing and saving use all of this month\'s pay, so there\'s no room set aside for wants. Fine for a month; over time the plan aims for 25–30%.'
+    : left < 0 ? `${M.money0(pl.guiltFreeSpent)} spent on wants against ${M.money0(gf.amount)} of room. The extra comes out of what's left to invest.`
+    : daysLeft > 0 ? `About ${M.money0(Math.floor(left / daysLeft))} a day for wants for the other ${daysLeft} days, spent however you like.` : 'Spend it however you like: that\'s the point of guilt-free.';
+  const guiltCard = `<div class="card">${bucketHead(6, gf)}
+    <div class="rows wrap">${wantRows.join('') || planRow('star', 'Nothing yet this month', 'Dining out, fun and shopping show up here as you log them.', null)}
+      <div class="row subtotal ${left >= 0 ? 'hi' : ''}"><div class="grow"><div class="t">${left >= 0 ? `Left for the rest of ${monthName}` : `Over for ${monthName}`}</div></div><span class="amt ${left < 0 ? 'status-bad' : ''}">${M.money(left)}</span></div>
+    </div>
+    <p class="small ${left < 0 ? 'status-warn' : 'muted'}" style="margin-top:10px">${gfLine}</p>
+  </div>`;
+
+  // Overview
+  const pos = pl.split.map((b) => Math.max(b.share, 0));
+  const tot = pos.reduce((a, b) => a + b, 0);
+  const scale = tot > 1 ? 1 / tot : 1;
+  const overview = pl.planBase > 0 ? `<section class="card split-card"><h2>Where ${monthName}'s pay goes</h2>
+    <div class="split-bar">${pl.split.map((b, i) => (pos[i] > 0.001 ? `<span style="width:${(pos[i] * scale * 100).toFixed(2)}%;background:${SPLIT_COLOR[b.key]}" data-tip="${esc(b.label)}: ${pctText(b.share)}"></span>` : '')).join('')}</div>
+    <div class="plan-cells">${pl.split.map((b) => { const [, cls] = splitStatus(b); return `<div class="plan-cell"><span class="dot" style="background:${SPLIT_COLOR[b.key]}"></span><div><div class="s">${b.key === 'guiltFree' ? 'Guilt-free' : b.label}</div><div class="v ${cls === 'status-good' || cls === 'muted' ? '' : cls}">${pctText(b.share)}</div><div class="s">target ${b.target}</div></div></div>`; }).join('')}</div>
+    <p class="small muted" style="margin-top:12px">${pl.payrollInvesting > 0 ? `Out of ${M.money0(pl.planBase)}: ${M.money0(pl.takeHome)} take-home plus ${M.money0(pl.payrollInvesting)} invested from your paychecks before they land.` : `Out of ${M.money0(pl.takeHome)} take-home this month.`}</p>
+  </section>` : '<section class="card split-card"><div class="empty-state">Once a paycheck is logged, this shows how it splits into fixed costs, investments, savings and guilt-free spending.</div></section>';
+
+  el.innerHTML = `${overview}
+    <section class="grid halves">${netWorthCard}${incomeCard}</section>
+    <section class="grid halves">${fixedCard}${investCard}</section>
+    <section class="grid halves">${savingsCard}${guiltCard}</section>
+    <p class="small muted" style="margin:4px 2px 24px">Targets from a popular spending plan: fixed costs 50–60% of take-home, investments about 10%, savings 5–10%, guilt-free spending 25–30%. A guide, not a rule. Needs like rides and groceries count as fixed costs; dining out, fun and shopping are guilt-free. Money taken from your paychecks for a 401(k), 403(b) or HSA is added to take-home and counted as invested.</p>`;
 }
 
 // ---------- weekly goals + net worth on the overview ----------

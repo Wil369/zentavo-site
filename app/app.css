@@ -264,3 +264,21 @@ td.amt.in { color: var(--mint); }
 .split-row .t .amt { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .split-row .s { font-size: 12.5px; color: var(--muted); margin-top: 2px; }
 @media (max-width: 720px) { .split-rows { grid-template-columns: 1fr; } }
+
+/* Spending plan */
+.card h2 .head-amt { margin-left: auto; text-transform: none; letter-spacing: 0; color: var(--text); font-size: 15px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.card h2 .head-amt + .link { margin-left: 4px; }
+.target-bar { position: relative; height: 12px; border-radius: 99px; background: var(--ink); margin: 2px 0 8px; overflow: hidden; }
+.target-bar .fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 99px; }
+.target-bar .band { position: absolute; top: 0; bottom: 0; border: 1.5px solid rgba(243,241,234,.75); border-radius: 4px; }
+.rows.wrap .s { white-space: normal; overflow: visible; }
+.row .amt small { display: block; text-align: right; font-size: 12px; font-weight: 700; color: var(--muted); }
+.rows.jobs { margin-top: 12px; padding-top: 4px; border-top: 1px dashed var(--line-2); }
+.sub-h { font-size: 12px; font-weight: 800; color: var(--muted); text-transform: uppercase; letter-spacing: .8px; margin: 14px 0 2px; }
+.plan-cells { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.plan-cell { display: flex; gap: 8px; align-items: flex-start; }
+.plan-cell .dot { width: 9px; height: 9px; border-radius: 50%; margin-top: 6px; flex: none; }
+.plan-cell .s { font-size: 12.5px; color: var(--muted); }
+.plan-cell .v { font-size: 22px; font-weight: 800; color: var(--text); font-variant-numeric: tabular-nums; line-height: 1.2; }
+.plan-cell .v.status-warn { color: var(--amber); } .plan-cell .v.status-bad { color: var(--rose); }
+@media (max-width: 720px) { .plan-cells { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

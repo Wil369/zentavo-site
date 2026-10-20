@@ -633,6 +633,47 @@ export function isDiningOut(t) {
   return DINING_WORDS.some((w) => text.includes(w));
 }
 
+// ---------- income sources (jobs) ----------
+const PERIODS = { Weekly: 4.33, Biweekly: 2.167, Monthly: 1 };
+export const isContractor = (s) => s.taxForm === '1099';
+export const retirementName = (s) => s.retirementPlan || '401(k)';
+/** Gross pay in a typical month: rate × hours for hourly jobs, else the salary (same as the iPhone). */
+export function grossMonthly(s) {
+  if (s.isHourly) {
+    if (!(s.hourlyRate > 0) || !(s.estimatedWeeklyHours > 0) || !s.payFrequency) return null;
+    const perPeriod = s.payFrequency === 'Weekly' ? s.estimatedWeeklyHours * s.hourlyRate
+      : s.payFrequency === 'Biweekly' ? s.estimatedWeeklyHours * s.hourlyRate * 2 : s.estimatedWeeklyHours * s.hourlyRate * 4.33;
+    return perPeriod * PERIODS[s.payFrequency];
+  }
+  if (!(s.salaryAmount > 0) || !s.salaryBasis) return null;
+  return s.salaryBasis === 'Annual' ? s.salaryAmount / 12 : s.salaryAmount;
+}
+export function retirementMonthly(s) {
+  const g = grossMonthly(s);
+  return !isContractor(s) && s.retirementPercent > 0 && g ? (g * s.retirementPercent) / 100 : null;
+}
+export function matchMonthly(s) {
+  const g = grossMonthly(s);
+  return !isContractor(s) && s.employerMatchPercent > 0 && g ? (g * s.employerMatchPercent) / 100 : null;
+}
+export function hsaMonthly(s) {
+  return !isContractor(s) && s.hsaPerPaycheck > 0 ? s.hsaPerPaycheck * (PERIODS[s.payFrequency] || PERIODS.Biweekly) : null;
+}
+
+/** Which kind of account an investing entry went to, from its name ("Fidelity Roth IRA" → Roth IRA). */
+export function investKind(t) {
+  const text = `${t.title} ${t.notes || ''}`.toLowerCase();
+  const words = new Set(text.split(/[^a-z0-9]+/));
+  if (text.includes('roth')) return 'Roth IRA';
+  if (words.has('ira')) return 'IRA';
+  if (words.has('hsa')) return 'HSA';
+  if (/401|403|457/.test(text)) return '401(k) or 403(b)';
+  if (['coinbase', 'bitcoin', 'crypto', 'btc', 'eth'].some((w) => words.has(w))) return 'Crypto';
+  return 'Stocks & brokerage';
+}
+const PLAN_NAME = { 'Food & Groceries': 'Groceries', Entertainment: 'Fun & entertainment' };
+export const planName = (c) => PLAN_NAME[c] || c;
+
 export function moneyPlan(data, now = new Date()) {
   const p = pace(data, now);
   let takeHome = 0, landed = 0, paydayCount = 0, landedCount = 0, fromPaychecks = false;
@@ -677,13 +718,42 @@ export function moneyPlan(data, now = new Date()) {
     ? (() => { const first = startOfDay(everyday.reduce((m, t) => (t.date < m ? t.date : m), now)); return first > addDays(today, -29) ? first : addDays(today, -29); })()
     : today;
   let essentialEveryday = 0;
+  const essentialLines = [];
   for (const c of ESSENTIAL_CATS) {
     const need = (t) => t.category === c && !isDiningOut(t);
-    const soFar = sum(thisMonth.filter((t) => countsForDay(t) && t.date <= now && need(t)));
+    const spentTx = thisMonth.filter((t) => countsForDay(t) && t.date <= now && need(t));
+    const soFar = sum(spentTx);
     const pace = paceDays ? sum(everyday.filter((t) => t.date >= windowStart && need(t))) / paceDays : 0;
-    essentialEveryday += Math.max(budgetsBy.get(c) || 0, soFar + pace * daysLeft);
+    const planned = Math.max(budgetsBy.get(c) || 0, soFar + pace * daysLeft);
+    essentialEveryday += planned;
+    if (planned > 0.005) essentialLines.push({ name: planName(c), category: c, amount: planned, spent: soFar, count: spentTx.length });
   }
-  const guiltFreeSpent = sum(thisMonth.filter((t) => countsForDay(t) && t.date <= now && (GUILT_FREE_CATS.has(t.category) || isDiningOut(t))));
+  const wants = thisMonth.filter((t) => countsForDay(t) && t.date <= now && (GUILT_FREE_CATS.has(t.category) || isDiningOut(t)));
+  const guiltFreeSpent = sum(wants);
+  const guiltFreeLines = [];
+  const dining = wants.filter(isDiningOut);
+  if (dining.length) guiltFreeLines.push({ name: 'Dining out', category: 'Dining', amount: sum(dining), count: dining.length });
+  for (const c of ['Entertainment', 'Shopping', 'Personal Care', 'Other']) {
+    const items = wants.filter((t) => t.category === c);
+    if (items.length) guiltFreeLines.push({ name: planName(c), category: c, amount: sum(items), count: items.length });
+  }
+  guiltFreeLines.sort((a, b) => b.amount - a.amount);
+  const byKind = new Map();
+  for (const t of thisMonth) {
+    if (t.type !== 'expense' || t.category !== INVESTING) continue;
+    const k = investKind(t);
+    const cur = byKind.get(k) || { name: k, amount: 0, count: 0 };
+    cur.amount += t.amount; cur.count += 1;
+    byKind.set(k, cur);
+  }
+  const investedLines = [...byKind.values()].sort((a, b) => b.amount - a.amount);
+  const contractorPay = sum(thisMonth.filter((t) => t.type === 'income' && (t.category === 'Freelance' || t.category === 'Side Hustle') && t.date <= now));
+  const sources = data.incomeSources || [];
+  const grossAll = sources.reduce((s, x) => s + (grossMonthly(x) || 0), 0);
+  const grossW2 = sources.filter((x) => !isContractor(x)).reduce((s, x) => s + (grossMonthly(x) || 0), 0);
+  const payrollInvesting = takeHome > 0 ? sources.reduce((s, x) => s + (retirementMonthly(x) || 0) + (hsaMonthly(x) || 0), 0) : 0;
+  const employerMatch = sources.reduce((s, x) => s + (matchMonthly(x) || 0), 0);
+  const typicalTakeHome = p ? p.perDay * 30.44 : null;
   const total = (arr) => arr.reduce((s, l) => s + l.total, 0);
   const billsTotal = total(bills), goalsTotal = total(goals), investTarget = total(investGoals);
   const free = takeHome - billsTotal - goalsTotal;
@@ -699,12 +769,17 @@ export function moneyPlan(data, now = new Date()) {
     canInvest, leftToInvest: Math.max(canInvest - invested, 0), leftThisMonth: free - everydaySpent - invested - savedInMonth,
     used: billsTotal + goalsTotal + everydaySpent + invested + savedInMonth,
     suggestedInvest: Math.floor((canInvest * 0.85) / 50) * 50,
-    essentialEveryday, guiltFreeSpent,
+    essentialEveryday, guiltFreeSpent, essentialLines, guiltFreeLines, investedLines, contractorPay,
+    grossEstimate: grossAll > 0 ? grossAll : null, grossW2: grossW2 > 0 ? grossW2 : null, typicalTakeHome, payrollInvesting, employerMatch,
+    // Money invested from paychecks before they land (401(k), HSA) is added back to take-home and counted as invested.
+    planBase: takeHome + payrollInvesting,
+    investedFromPay: Math.max(invested, investTarget),
     split: (() => {
+      const base = takeHome + payrollInvesting;
       const fixed = billsTotal + goalsTotal + essentialEveryday;
-      const investments = Math.max(invested, investTarget);
-      const amounts = { fixed, investments, savings: savedInMonth, guiltFree: takeHome - fixed - investments - savedInMonth };
-      return BUCKETS.map((b) => ({ ...b, amount: amounts[b.key], share: takeHome > 0 ? amounts[b.key] / takeHome : 0 }));
+      const investments = Math.max(invested, investTarget) + payrollInvesting;
+      const amounts = { fixed, investments, savings: savedInMonth, guiltFree: base - fixed - investments - savedInMonth };
+      return BUCKETS.map((b) => ({ ...b, amount: amounts[b.key], share: base > 0 ? amounts[b.key] / base : 0 }));
     })(),
   };
 }
