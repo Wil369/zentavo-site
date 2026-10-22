@@ -1,6 +1,6 @@
 // Loads the person's Zentavo data from their private iCloud (CloudKit JS), or sample data.
-import { CONFIG } from './config.js?v=20261020a';
-import { addDays, addMonths, monthStart, startOfDay } from './money.js?v=20261020a';
+import { CONFIG } from './config.js?v=20261021a';
+import { addDays, addMonths, monthStart, startOfDay } from './money.js?v=20261021a';
 
 const CK_SCRIPT = 'https://cdn.apple-cloudkit.com/ck/2/cloudkit.js';
 
@@ -139,7 +139,9 @@ function enumVal(r, n, options) {
     if (f.type === 'BYTES') { try { text = atob(f.value); } catch { /* keep */ } }
   }
   const lower = text.toLowerCase();
-  return options.find((o) => lower === o.toLowerCase()) ?? options.find((o) => lower.includes(o.toLowerCase())) ?? null;
+  // Longest name first, so "Biweekly" isn't read as "Weekly".
+  const longestFirst = [...options].sort((a, b) => b.length - a.length);
+  return options.find((o) => lower === o.toLowerCase()) ?? longestFirst.find((o) => lower.includes(o.toLowerCase())) ?? null;
 }
 
 export function mapRecords(records) {

@@ -1,6 +1,6 @@
-import { CONFIG } from './config.js?v=20261020a';
-import { cloudConfigured, connect, describeError, fetchAll, mapRecords, sampleData } from './data.js?v=20261020a';
-import * as M from './money.js?v=20261020a';
+import { CONFIG } from './config.js?v=20261021a';
+import { cloudConfigured, connect, describeError, fetchAll, mapRecords, sampleData } from './data.js?v=20261021a';
+import * as M from './money.js?v=20261021a';
 
 const root = document.getElementById('root');
 const tipEl = document.getElementById('tip');
