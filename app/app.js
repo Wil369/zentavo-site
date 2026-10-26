@@ -1,6 +1,6 @@
-import { CONFIG } from './config.js?v=20261026a';
-import { cloudConfigured, connect, describeError, fetchAll, mapRecords, sampleData } from './data.js?v=20261026a';
-import * as M from './money.js?v=20261026a';
+import { CONFIG } from './config.js?v=20261026b';
+import { cloudConfigured, connect, describeError, fetchAll, mapRecords, sampleData } from './data.js?v=20261026b';
+import * as M from './money.js?v=20261026b';
 
 const root = document.getElementById('root');
 const tipEl = document.getElementById('tip');
@@ -273,6 +273,9 @@ function viewOverview(el, d) {
 const compact = (v) => (v >= 1000 ? `$${(v / 1000).toFixed(1).replace(/\.0$/, '')}K` : M.money0(v));
 const both = (sign, v) => `<span class="full">${sign}${M.money0(v)}</span><span class="compact">${sign}${compact(v)}</span>`;
 
+/** Money moved to savings or investing: it leaves checking but isn't spent. */
+const isMoveEvent = (e) => !e.isIncome && !!e.transaction && M.MOVED.has(e.transaction.category);
+
 function upcomingStrip(d, p, today) {
   const end = M.addDays(today, 14);
   // A spending budget entered as a repeat (Transportation $400) isn't a bill: its money is
@@ -281,7 +284,7 @@ function upcomingStrip(d, p, today) {
   const events = M.upcomingEvents(d, today, end).filter((e) => !e.isIncome && !e.isPaid)
     .map((e) => ({ ...e, budget: !!e.transaction && M.isBudgetLike(e.transaction, d.transactions) }))
     .sort((a, b) => a.budget - b.budget);
-  const bills = events.filter((e) => !e.budget);
+  const bills = events.filter((e) => !e.budget && !isMoveEvent(e));
   const pays = p ? M.projectedPaydays(p, end) : [];
   const cells = [];
   for (let i = 0; i < 14; i++) {
@@ -290,7 +293,7 @@ function upcomingStrip(d, p, today) {
     const pay = pays.find((x) => M.sameDay(x.day, day));
     const tags = [
       pay ? `<div class="tag pay" data-tip="<b>Payday</b><br>about ${M.money(pay.amount)}">${both('+', pay.amount)}</div>` : '',
-      ...dayEvents.slice(0, 2).map((e) => `<div class="tag ${e.budget ? 'budget' : ''}" data-tip="<b>${esc(e.title)}</b><br>${M.money(e.amount)} · ${e.budget ? 'a spending budget, counted day by day' : esc(e.detail)}">${both('', e.amount)}</div>`),
+      ...dayEvents.slice(0, 2).map((e) => `<div class="tag ${e.budget ? 'budget' : isMoveEvent(e) ? 'move' : ''}" data-tip="<b>${esc(e.title)}</b><br>${M.money(e.amount)} · ${e.budget ? 'a spending budget, counted day by day' : isMoveEvent(e) ? 'moved to savings, still yours, not spending' : esc(e.detail)}">${both(isMoveEvent(e) ? '→' : '', e.amount)}</div>`),
       dayEvents.length > 2 ? `<div class="tag" data-tip="${esc(dayEvents.slice(2).map((e) => `${e.title} ${M.money(e.amount)}`).join('<br>'))}">+${dayEvents.length - 2} more</div>` : '',
     ].join('');
     cells.push(`<div class="strip-day ${i === 0 ? 'today' : ''}">
@@ -533,7 +536,7 @@ function viewBills(el, d) {
   const today = M.startOfDay(now);
   const events = M.upcomingEvents(d, today, M.addDays(today, 31)).filter((e) => !e.isIncome && !e.isPaid)
     .map((e) => ({ ...e, budget: !!e.transaction && M.isBudgetLike(e.transaction, d.transactions) }));
-  const due = events.filter((e) => !e.budget);
+  const due = events.filter((e) => !e.budget && !isMoveEvent(e));
   const p = M.pace(d, now);
   const pays = p ? M.projectedPaydays(p, M.addDays(today, 31)) : [];
   const timeline = [...events.map((e) => ({ ...e, kind: 'bill' })), ...pays.map((x) => ({ date: x.day, title: 'Payday', amount: x.amount, kind: 'pay' }))].sort((a, b) => a.date - b.date);
@@ -555,8 +558,8 @@ function viewBills(el, d) {
       <div class="card"><h2>Coming up</h2>
         <div class="rows">${timeline.map((e) => `<div class="row">
           <span class="ic">${svg(e.kind === 'pay' ? 'coin' : catIcon(e.transaction?.category))}</span>
-          <div class="grow"><div class="t">${esc(e.title)}</div><div class="s">${fmtDay(e.date, { weekday: 'short', month: 'short', day: 'numeric' })}${e.kind === 'bill' ? ` · ${e.budget ? 'spending budget, counted day by day' : esc(e.detail)}` : ' · expected'}</div></div>
-          <span class="amt ${e.kind === 'pay' ? 'in' : e.budget ? 'muted' : ''}">${e.kind === 'pay' ? '+' : e.budget ? '' : '−'}${M.money(e.amount)}</span></div>`).join('') || '<div class="empty-state">Nothing in the next month</div>'}</div>
+          <div class="grow"><div class="t">${esc(e.title)}</div><div class="s">${fmtDay(e.date, { weekday: 'short', month: 'short', day: 'numeric' })}${e.kind === 'bill' ? ` · ${e.budget ? 'spending budget, counted day by day' : isMoveEvent(e) ? `to ${e.transaction.category === M.INVESTING ? 'investing' : 'savings'}, not spending · ${esc(e.detail)}` : esc(e.detail)}` : ' · expected'}</div></div>
+          <span class="amt ${e.kind === 'pay' ? 'in' : e.budget ? 'muted' : isMoveEvent(e) ? 'move' : ''}">${e.kind === 'pay' ? '+' : e.budget ? '' : isMoveEvent(e) ? '→ ' : '−'}${M.money(e.amount)}</span></div>`).join('') || '<div class="empty-state">Nothing in the next month</div>'}</div>
       </div>
     </section>`;
 }
