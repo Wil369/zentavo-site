@@ -1,6 +1,6 @@
-import { CONFIG } from './config.js?v=20261021a';
-import { cloudConfigured, connect, describeError, fetchAll, mapRecords, sampleData } from './data.js?v=20261021a';
-import * as M from './money.js?v=20261021a';
+import { CONFIG } from './config.js?v=20261026a';
+import { cloudConfigured, connect, describeError, fetchAll, mapRecords, sampleData } from './data.js?v=20261026a';
+import * as M from './money.js?v=20261026a';
 
 const root = document.getElementById('root');
 const tipEl = document.getElementById('tip');
@@ -277,7 +277,8 @@ function upcomingStrip(d, p, today) {
   const end = M.addDays(today, 14);
   // A spending budget entered as a repeat (Transportation $400) isn't a bill: its money is
   // counted day by day, so it's shown faded and left out of the bill total.
-  const events = M.upcomingEvents(d, today, end).filter((e) => !e.isIncome)
+  // A bill already paid (confirmed by its email) isn't still to come.
+  const events = M.upcomingEvents(d, today, end).filter((e) => !e.isIncome && !e.isPaid)
     .map((e) => ({ ...e, budget: !!e.transaction && M.isBudgetLike(e.transaction, d.transactions) }))
     .sort((a, b) => a.budget - b.budget);
   const bills = events.filter((e) => !e.budget);
@@ -530,7 +531,7 @@ function viewBills(el, d) {
   const total = counted.reduce((s, l) => s + l.total, 0);
   const saved = lines.filter((l) => l.counted && l.fullTotal).reduce((s, l) => s + (l.fullTotal - l.total), 0);
   const today = M.startOfDay(now);
-  const events = M.upcomingEvents(d, today, M.addDays(today, 31)).filter((e) => !e.isIncome)
+  const events = M.upcomingEvents(d, today, M.addDays(today, 31)).filter((e) => !e.isIncome && !e.isPaid)
     .map((e) => ({ ...e, budget: !!e.transaction && M.isBudgetLike(e.transaction, d.transactions) }));
   const due = events.filter((e) => !e.budget);
   const p = M.pace(d, now);

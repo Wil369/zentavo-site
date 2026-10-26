@@ -79,16 +79,59 @@ function nextDueDate(debt, onOrAfter) {
   return null;
 }
 
-/** Repeating entries and debt payments due between two dates (end exclusive), in order. */
+// ---------- bills paid by email (BillPayment) ----------
+/** Written into an entry's notes when a payment email confirmed it (MGE's "Payment Accepted"). */
+export const CONFIRMED = 'Confirmed: ';
+export const isConfirmed = (t) => (t.notes || '').includes(CONFIRMED);
+const SAME_OCCURRENCE = 36 * 3600e3;
+const instant = (t) => t.occurrenceDate || t.date;
+
+/** What months to come plan on: the latest confirmed amount before `before`, else the repeat's own. */
+export function planned(template, before, series) {
+  const confirmed = [template, ...series].filter((t) => isConfirmed(t) && instant(t) < before);
+  if (confirmed.length) {
+    const latest = confirmed.reduce((a, b) => (instant(b) > instant(a) ? b : a));
+    return { amount: latest.amount, full: latest.fullAmount };
+  }
+  return { amount: template.amount, full: template.fullAmount };
+}
+
+/** One scheduled day of a repeat: its real entry when there is one, else the planned amount; null if deleted. */
+export function slot(template, date, series, skippedDays) {
+  if (Math.abs(template.date - date) < 1000) {
+    return { amount: template.amount, full: template.fullAmount, isPaid: isConfirmed(template), entry: template };
+  }
+  const entry = series.find((t) => Math.abs(instant(t) - date) < SAME_OCCURRENCE);
+  if (entry) return { amount: entry.amount, full: entry.fullAmount, isPaid: isConfirmed(entry), entry };
+  if (skippedDays.some((d) => Math.abs(d - date) < SAME_OCCURRENCE)) return null;
+  const p = planned(template, date, series);
+  return { amount: p.amount, full: p.full, isPaid: false, entry: null };
+}
+
+/** Repeating entries and debt payments due between two dates (end exclusive), in order. Each day
+ *  counts its real entry when there is one; days to come plan on the latest confirmed amount. */
 export function upcomingEvents(data, from, to) {
   const events = [];
+  const series = new Map();
+  for (const t of data.transactions) {
+    if (!t.recurringTemplateID) continue;
+    if (!series.has(t.recurringTemplateID)) series.set(t.recurringTemplateID, []);
+    series.get(t.recurringTemplateID).push(t);
+  }
+  const skips = new Map();
+  for (const s of data.skipped || []) {
+    if (!skips.has(s.templateID)) skips.set(s.templateID, []);
+    skips.get(s.templateID).push(s.day);
+  }
   for (const t of data.transactions) {
     if (!isTemplate(t)) continue;
     const dates = [t.date, ...occurrences(t.date, t.recurringFrequency, to)];
     for (const date of dates) {
       if (date >= from && date < to) {
-        events.push({ date, title: t.title, amount: t.amount, isIncome: t.type === 'income',
-          detail: t.recurringFrequency.toLowerCase(), transaction: t });
+        const day = slot(t, date, series.get(t.id) || [], skips.get(t.id) || []);
+        if (!day) continue;
+        events.push({ date, title: t.title, amount: day.amount, isIncome: t.type === 'income',
+          detail: t.recurringFrequency.toLowerCase(), transaction: t, isPaid: day.isPaid });
       }
     }
   }

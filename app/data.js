@@ -1,6 +1,6 @@
 // Loads the person's Zentavo data from their private iCloud (CloudKit JS), or sample data.
-import { CONFIG } from './config.js?v=20261021a';
-import { addDays, addMonths, monthStart, startOfDay } from './money.js?v=20261021a';
+import { CONFIG } from './config.js?v=20261026a';
+import { addDays, addMonths, monthStart, startOfDay } from './money.js?v=20261026a';
 
 const CK_SCRIPT = 'https://cdn.apple-cloudkit.com/ck/2/cloudkit.js';
 
@@ -166,6 +166,7 @@ export function mapRecords(records) {
       isRecurring: bool(r, 'isRecurring'),
       recurringFrequency: enumVal(r, 'recurringFrequency', ['Weekly', 'Biweekly', 'Monthly']),
       recurringTemplateID: str(r, 'recurringTemplateID') || null,
+      occurrenceDate: date(r, 'occurrenceDate'),
       fullAmount: numOpt(r, 'fullAmount'),
     };
   }).filter((t) => t.amount > 0 || t.title);
@@ -213,11 +214,15 @@ export function mapRecords(records) {
     employerMatchPercent: numOpt(r, 'employerMatchPercent'), hsaPerPaycheck: numOpt(r, 'hsaPerPaycheck'),
   }));
 
+  // Days of a repeat the user deleted: they don't count as bills.
+  const skipped = of('SkippedOccurrence').map((r) => ({ templateID: str(r, 'templateID'), day: date(r, 'day') }))
+    .filter((s) => s.templateID && s.day);
+
   const snapshots = of('NetWorthSnapshot').map((r) => ({
     day: date(r, 'day') || new Date(0), assets: num(r, 'assets'), liabilities: num(r, 'liabilities'),
   }));
 
-  return { transactions, settings: settingsList[0] || null, debts, goals, budgets, habitGoals, assets, snapshots, incomeSources, counts, source: 'icloud' };
+  return { transactions, settings: settingsList[0] || null, debts, goals, budgets, habitGoals, assets, snapshots, incomeSources, skipped, counts, source: 'icloud' };
 }
 
 // ---------- sample data (for visitors, and before iCloud is connected) ----------
