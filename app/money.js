@@ -82,16 +82,29 @@ function nextDueDate(debt, onOrAfter) {
 // ---------- bills paid by email (BillPayment) ----------
 /** Written into an entry's notes when a payment email confirmed it (MGE's "Payment Accepted"). */
 export const CONFIRMED = 'Confirmed: ';
-export const isConfirmed = (t) => (t.notes || '').includes(CONFIRMED);
+// The line the iPhone adds when a payment email settles a bill: "Confirmed: $112.70 paid Oct 26".
+// Only that whole line counts, not "Order Confirmed: #112" somewhere in a note.
+export const isConfirmed = (t) => (t.notes || '').split('\n').some((line) => line.startsWith(CONFIRMED) && / paid\b/.test(line));
 const SAME_OCCURRENCE = 36 * 3600e3;
 const instant = (t) => t.occurrenceDate || t.date;
 
-/** What months to come plan on: the latest confirmed amount before `before`, else the repeat's own. */
+// Half, a third, a quarter: a split share read back from amounts snaps to the one it was set to (as on the iPhone).
+const SPLIT_SHARES = [1, 0.5, 1 / 3, 0.25];
+export const cleanShare = (s) => SPLIT_SHARES.find((x) => Math.abs(x - s) < 0.005) ?? s;
+const myShare = (total, s) => (s >= 0.999 ? total : Math.round(total * s * 100) / 100);
+
+/**
+ * What months to come plan on: the real bill as last confirmed, at the split the repeat has now
+ * ("Just me" after a split plans the whole bill), else the repeat's own amount.
+ */
 export function planned(template, before, series) {
   const confirmed = [template, ...series].filter((t) => isConfirmed(t) && instant(t) < before);
   if (confirmed.length) {
     const latest = confirmed.reduce((a, b) => (instant(b) > instant(a) ? b : a));
-    return { amount: latest.amount, full: latest.fullAmount };
+    const full = latest.fullAmount || latest.amount;
+    const s = cleanShare(share(template));
+    if (s >= 0.999) return { amount: full, full: null };
+    return { amount: myShare(full, s), full };
   }
   return { amount: template.amount, full: template.fullAmount };
 }
@@ -805,12 +818,17 @@ export function moneyPlan(data, now = new Date()) {
   // Saved this month: what's moved already, or the planned moves when more is still to come.
   const savingsPlanned = total(savingsMoves);
   const savedInMonth = Math.max(saved, savingsPlanned);
-  const canInvest = Math.max(free - projectedEveryday - savedInMonth, 0);
+  // Debt payments beyond the minimums planned as bills (an extra payment, a debt with no
+  // minimum): money out this month, the same as on the iPhone.
+  const debtPaid = sum(thisMonth.filter((t) => t.type === 'expense' && t.category === DEBT));
+  const debtPlanned = bills.filter((l) => l.kind === 'Debt payment').reduce((s, l) => s + l.total, 0);
+  const debtExtra = Math.max(debtPaid - debtPlanned, 0);
+  const canInvest = Math.max(free - projectedEveryday - savedInMonth - debtExtra, 0);
   return {
     takeHome, landed, paydayCount, landedCount, fromPaychecks, bills: bills.sort((a, b) => b.total - a.total), goals, investGoals, savingsMoves, savingsPlanned, savedInMonth,
     everydaySpent, perDay, paceDays, daysLeft, everydayBudgets, everydayBudgetTotal, usesBudgets: everydayBudgetTotal > paceEveryday, invested, saved, billsTotal, goalsTotal, investTarget, free, projectedEveryday,
-    canInvest, leftToInvest: Math.max(canInvest - invested, 0), leftThisMonth: free - everydaySpent - invested - savedInMonth,
-    used: billsTotal + goalsTotal + everydaySpent + invested + savedInMonth,
+    canInvest, leftToInvest: Math.max(canInvest - invested, 0), leftThisMonth: free - everydaySpent - invested - savedInMonth - debtExtra,
+    used: billsTotal + goalsTotal + everydaySpent + invested + savedInMonth + debtExtra, debtExtra,
     suggestedInvest: Math.floor((canInvest * 0.85) / 50) * 50,
     essentialEveryday, guiltFreeSpent, essentialLines, guiltFreeLines, investedLines, contractorPay,
     grossEstimate: grossAll > 0 ? grossAll : null, grossW2: grossW2 > 0 ? grossW2 : null, typicalTakeHome, payrollInvesting, employerMatch,
@@ -819,7 +837,7 @@ export function moneyPlan(data, now = new Date()) {
     investedFromPay: Math.max(invested, investTarget),
     split: (() => {
       const base = takeHome + payrollInvesting;
-      const fixed = billsTotal + goalsTotal + essentialEveryday;
+      const fixed = billsTotal + goalsTotal + essentialEveryday + debtExtra;
       const investments = Math.max(invested, investTarget) + payrollInvesting;
       const amounts = { fixed, investments, savings: savedInMonth, guiltFree: base - fixed - investments - savedInMonth };
       return BUCKETS.map((b) => ({ ...b, amount: amounts[b.key], share: base > 0 ? amounts[b.key] / base : 0 }));

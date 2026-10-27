@@ -6,14 +6,15 @@
   <title>Zentavo Web</title>
   <meta name="description" content="Your Zentavo money, on a big screen. Sign in with Apple; your data comes straight from your iCloud. No bank login, no Zentavo server.">
   <meta name="theme-color" content="#0B0F14">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="app.css?v=20261026b">
+  <!-- Only this site and Apple's CloudKit can run or load anything here. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' https://cdn.apple-cloudkit.com; connect-src 'self' https://*.apple-cloudkit.com https://*.icloud.com https://*.apple.com; img-src 'self' data: https://*.apple-cloudkit.com https://*.apple.com https://*.icloud.com https://*.cdn-apple.com; style-src 'self' 'unsafe-inline' https://cdn.apple-cloudkit.com; font-src 'self' https://cdn.apple-cloudkit.com; frame-src https://*.apple-cloudkit.com https://*.apple.com https://*.icloud.com; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta name="referrer" content="no-referrer">
+  <link rel="stylesheet" href="app.css?v=20261027a">
 </head>
 <body>
   <div id="root"><div class="gate"><p class="loading">Loading Zentavo…</p></div></div>
   <div class="tip" id="tip" role="tooltip"></div>
-  <script type="module" src="app.js?v=20261026b"></script>
+  <div id="apple-sign-out-button" hidden></div>
+  <script type="module" src="app.js?v=20261027a"></script>
 </body>
 </html>

@@ -1,6 +1,11 @@
-import { CONFIG } from './config.js?v=20261026b';
-import { cloudConfigured, connect, describeError, fetchAll, mapRecords, sampleData } from './data.js?v=20261026b';
-import * as M from './money.js?v=20261026b';
+import { CONFIG } from './config.js?v=20261027a';
+import { cloudConfigured, connect, describeError, fetchAll, mapRecords, sampleData } from './data.js?v=20261027a';
+import * as M from './money.js?v=20261027a';
+
+// Never run over plain HTTP: the iCloud session would travel unencrypted.
+if (location.protocol === 'http:' && !/^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname)) {
+  location.replace(`https://${location.host}${location.pathname}${location.search}${location.hash}`);
+}
 
 const root = document.getElementById('root');
 const tipEl = document.getElementById('tip');
@@ -60,10 +65,38 @@ const CAT_SLOT = { Bills: 1, 'Food & Groceries': 2, Transportation: 3, Shopping:
 const slotColor = (c) => `var(--s${CAT_SLOT[c] || 8})`;
 
 // ---------- tooltip ----------
+/**
+ * Tooltips are written as tiny HTML (<b>, <br>) with record text escaped inside. Whatever comes
+ * through, only bold, line breaks and text are kept: no other tags, no attributes, no handlers.
+ * A <template> is inert, so nothing in it loads or runs while it's read.
+ */
+function safeTip(html) {
+  const tpl = document.createElement('template');
+  tpl.innerHTML = html || '';
+  const out = [];
+  const walk = (nodes, into) => {
+    for (const n of nodes) {
+      if (n.nodeType === Node.TEXT_NODE) into.push(document.createTextNode(n.textContent));
+      else if (n.nodeType === Node.ELEMENT_NODE) {
+        if (n.tagName === 'BR') into.push(document.createElement('br'));
+        else if (n.tagName === 'B') {
+          const b = document.createElement('b');
+          const kids = [];
+          walk(n.childNodes, kids);
+          b.append(...kids);
+          into.push(b);
+        } else walk(n.childNodes, into);
+      }
+    }
+  };
+  walk(tpl.content.childNodes, out);
+  return out;
+}
+
 document.addEventListener('mousemove', (e) => {
   const target = e.target.closest?.('[data-tip]');
   if (!target) { tipEl.classList.remove('on'); return; }
-  tipEl.innerHTML = target.getAttribute('data-tip');
+  tipEl.replaceChildren(...safeTip(target.getAttribute('data-tip')));
   tipEl.classList.add('on');
   const w = tipEl.offsetWidth, h = tipEl.offsetHeight;
   let x = e.clientX + 14, y = e.clientY + 14;
@@ -109,7 +142,22 @@ function setGateError(e, withRetry = false) {
   document.getElementById('gate-retry')?.addEventListener('click', () => location.reload());
 }
 
+/**
+ * CloudKit draws its "Sign out" button once, into #apple-sign-out-button, which lives outside
+ * #root so re-rendering never destroys it. Each render moves it into the sidebar.
+ */
+function parkSignOut() {
+  const host = document.getElementById('apple-sign-out-button');
+  if (host && host.parentElement !== document.body) { host.hidden = true; document.body.appendChild(host); }
+}
+function placeSignOut() {
+  const host = document.getElementById('apple-sign-out-button');
+  const slot = document.getElementById('sign-out-slot');
+  if (host && slot) { slot.appendChild(host); host.hidden = false; }
+}
+
 async function loadFromCloud() {
+  parkSignOut();
   root.innerHTML = `<div class="gate"><p class="loading" id="progress">Loading your Zentavo from iCloud…</p></div>`;
   const records = await fetchAll(state.container, (n) => {
     const p = document.getElementById('progress');
@@ -121,6 +169,7 @@ async function loadFromCloud() {
 }
 
 function renderGate(error) {
+  parkSignOut();
   root.innerHTML = `
     <div class="gate"><div class="gate-card">
       <div class="brand" style="justify-content:center;padding:0">${brandMark()}<span>Zentavo</span></div>
@@ -132,7 +181,6 @@ function renderGate(error) {
         <div>${svg('check')}<span>The same numbers as your iPhone: daily limit, paydays, bills and splits.</span></div>
       </div>
       <div id="apple-sign-in-button"></div>
-      <div id="apple-sign-out-button" hidden></div>
       <p class="error" id="gate-error" role="alert" ${error ? '' : 'hidden'}>${esc(error || '')}</p>
       <p class="small muted" style="margin-top:18px">Just looking? <a href="?sample">See it with sample data</a></p>
     </div></div>`;
@@ -154,6 +202,7 @@ function render() {
   const hour = new Date().getHours();
   const greeting = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
   const title = VIEWS.find(([k]) => k === state.view)[1];
+  parkSignOut();
   root.innerHTML = `
     <div class="shell">
       <nav class="sidebar" aria-label="Sections">
@@ -161,7 +210,7 @@ function render() {
         ${VIEWS.map(([k, label]) => `<button class="nav-btn" data-view="${k}" ${k === state.view ? 'aria-current="page"' : ''}>${svg(k)}<span>${label}</span></button>`).join('')}
         <div class="sidebar-foot">
           <div class="privacy-pill">${svg('lock')}<span>${d.source === 'icloud' ? 'Read straight from your iCloud. Nothing stored by Zentavo.' : 'Sample data. Your real data never leaves your iCloud.'}</span></div>
-          ${d.source === 'icloud' ? `<div id="apple-sign-out-button"></div>` : ''}
+          ${d.source === 'icloud' ? `<div id="sign-out-slot"></div>` : ''}
         </div>
       </nav>
       <main class="main">
@@ -177,6 +226,7 @@ function render() {
         <div id="view"></div>
       </main>
     </div>`;
+  placeSignOut();
   root.querySelectorAll('[data-view]').forEach((b) => b.addEventListener('click', () => {
     state.view = b.dataset.view;
     history.replaceState(null, '', `#${state.view}`);
@@ -293,8 +343,8 @@ function upcomingStrip(d, p, today) {
     const pay = pays.find((x) => M.sameDay(x.day, day));
     const tags = [
       pay ? `<div class="tag pay" data-tip="<b>Payday</b><br>about ${M.money(pay.amount)}">${both('+', pay.amount)}</div>` : '',
-      ...dayEvents.slice(0, 2).map((e) => `<div class="tag ${e.budget ? 'budget' : isMoveEvent(e) ? 'move' : ''}" data-tip="<b>${esc(e.title)}</b><br>${M.money(e.amount)} · ${e.budget ? 'a spending budget, counted day by day' : isMoveEvent(e) ? 'moved to savings, still yours, not spending' : esc(e.detail)}">${both(isMoveEvent(e) ? '→' : '', e.amount)}</div>`),
-      dayEvents.length > 2 ? `<div class="tag" data-tip="${esc(dayEvents.slice(2).map((e) => `${e.title} ${M.money(e.amount)}`).join('<br>'))}">+${dayEvents.length - 2} more</div>` : '',
+      ...dayEvents.slice(0, 2).map((e) => `<div class="tag ${e.budget ? 'budget' : isMoveEvent(e) ? 'move' : ''}" data-tip="${esc(`<b>${esc(e.title)}</b><br>${M.money(e.amount)} · ${e.budget ? 'a spending budget, counted day by day' : isMoveEvent(e) ? 'moved to savings, still yours, not spending' : esc(e.detail)}`)}">${both(isMoveEvent(e) ? '→' : '', e.amount)}</div>`),
+      dayEvents.length > 2 ? `<div class="tag" data-tip="${esc(dayEvents.slice(2).map((e) => `${esc(e.title)} ${M.money(e.amount)}`).join('<br>'))}">+${dayEvents.length - 2} more</div>` : '',
     ].join('');
     cells.push(`<div class="strip-day ${i === 0 ? 'today' : ''}">
       <div class="strip-dow">${i === 0 ? 'Today' : day.toLocaleDateString('en-US', { weekday: 'short' })}</div>
@@ -365,7 +415,7 @@ function categoryBars(d, month) {
   if (!rows.length) return '<div class="empty-state">No everyday spending this month yet</div>';
   const max = rows[0][1];
   const total = rows.reduce((s, r) => s + r[1], 0);
-  return rows.map(([c, v]) => `<div class="cat-row" data-tip="<b>${esc(c)}</b><br>${M.money(v)} · ${Math.round((v / total) * 100)}% of everyday spending">
+  return rows.map(([c, v]) => `<div class="cat-row" data-tip="${esc(`<b>${esc(c)}</b><br>${M.money(v)} · ${Math.round((v / total) * 100)}% of everyday spending`)}">
       <span class="name">${esc(M.shortName(c))}</span>
       <span class="cat-track"><span class="cat-fill" style="width:${(v / max) * 100}%"></span></span>
       <span class="val">${M.money0(v)}</span></div>`).join('')
@@ -374,7 +424,8 @@ function categoryBars(d, month) {
 
 function cashFlow(d, now, p, outlook, fig) {
   const income = outlook ? Math.max(outlook.expected, outlook.received) : fig.income;
-  const bills = M.billsInMonth(d, now);
+  // Moves to savings/investing are shown once, as Savings, not also inside Bills.
+  const bills = M.billLines(d, now).filter((l) => l.counted && (l.habit || !M.MOVED.has(l.category))).reduce((s, l) => s + l.total, 0);
   const cats = new Map();
   for (const t of d.transactions) if (M.countsForDay(t) && M.inMonth(t.date, now)) cats.set(t.category, (cats.get(t.category) || 0) + t.amount);
   let catRows = [...cats].sort((a, b) => b[1] - a[1]);
@@ -518,7 +569,13 @@ function drawTxTable(host, d) {
 function exportCSV(list) {
   const rows = [['Date', 'Name', 'Category', 'Type', 'Amount', 'Your share of', 'Notes']];
   for (const t of list) rows.push([t.date.toISOString().slice(0, 10), t.title, t.category, t.type, t.amount.toFixed(2), t.fullAmount ? t.fullAmount.toFixed(2) : '', t.notes || '']);
-  const csv = rows.map((r) => r.map((c) => `"${String(c ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
+  // Names and notes can come from emails: anything a spreadsheet would run as a formula gets a leading '.
+  const cell = (c, i) => {
+    let v = String(c ?? '');
+    if (i !== 4 && i !== 5 && /^[=+\-@\t\r]/.test(v)) v = `'${v}`;
+    return `"${v.replace(/"/g, '""')}"`;
+  };
+  const csv = rows.map((r) => r.map(cell).join(',')).join('\n');
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
   a.download = `zentavo-${new Date().toISOString().slice(0, 10)}.csv`;
@@ -652,7 +709,8 @@ function viewPlan(el, d) {
           ${row('coin', 'Take-home', pl.fromPaychecks ? `${pl.paydayCount} paychecks · ${pl.landedCount} in${coming > 0 ? `, ${coming} coming` : ''}` : 'This month\'s income', pl.takeHome, '+', 'in')}
           ${pl.bills.map((l) => row(catIcon(l.category), l.title, l.billsAccount ? esc(l.kind) : l.fullTotal ? `Your ${M.sharePhrase(l.share)} of ${M.money(l.fullTotal)}` : l.kind === 'Debt payment' ? 'Debt minimum' : l.times > 1 ? `${l.times} times this month` : 'Monthly', l.total, '−')).join('')}
           ${pl.goals.map((l) => row('family', l.title, esc(l.kind), l.total, '−')).join('')}
-          ${sub('Free after bills & goals', pl.free)}
+          ${pl.debtExtra >= 0.005 ? row('card', 'Paid toward debt', 'Beyond the minimums this month', pl.debtExtra, '−') : ''}
+          ${sub('Free after bills & goals', pl.free - pl.debtExtra)}
           ${row('cart', 'Everyday spending', pl.usesBudgets ? `Your budgets: ${pl.everydayBudgets.slice(0, 3).map((b) => `${M.shortName(b.category)} ${M.money0(b.amount)}`).join(', ')} · ${M.money0(pl.everydaySpent)} spent so far` : pl.daysLeft && pl.paceDays ? `${M.money0(pl.everydaySpent)} so far + about ${M.money0(pl.perDay)} a day for ${pl.daysLeft} more days` : `${M.money0(pl.everydaySpent)} this month`, pl.projectedEveryday, '−')}
           ${pl.savedInMonth > 0 ? row('coin', 'To savings', pl.savingsPlanned > 0 ? `${pl.savingsMoves.reduce((s, l) => s + l.times, 0)} moves this month${pl.saved > 0 ? ` · ${M.money0(pl.saved)} moved so far` : ''}` : 'This month', pl.savedInMonth, '−') : ''}
           ${pl.invested > 0 ? row('networth', 'Already invested', 'This month', pl.invested, '−') : ''}
